@@ -30,6 +30,7 @@ ShapeType = Literal[
 ConnectorStyle = Literal["straight", "elbowed", "curved"]
 FontCategory = Literal["sans", "serif", "handwritten"]
 TextAlign = Literal["left", "center", "right"]
+TextValign = Literal["top", "middle", "bottom"]
 LineStyle = Literal["normal", "dashed", "dotted"]
 
 
@@ -63,6 +64,12 @@ class Node(StrictModel):
     )
     text_align: TextAlign = Field(
         description="Horizontal alignment of the text inside the shape"
+    )
+    text_valign: TextValign = Field(
+        description=(
+            "Vertical placement of the text inside the shape. Use 'top' for "
+            "container/group titles that sit at the top edge of a large box."
+        )
     )
 
 

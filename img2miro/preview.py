@@ -62,7 +62,12 @@ def _text_svg(node: Node, x0: float) -> str:
 
     lines = node.text.split("\n")
     line_height = node.font_size * 1.25
-    start_y = node.y - line_height * (len(lines) - 1) / 2
+    if node.text_valign == "top":
+        start_y = node.y - node.height / 2 + node.font_size
+    elif node.text_valign == "bottom":
+        start_y = node.y + node.height / 2 - line_height * (len(lines) - 1) - node.font_size / 2
+    else:
+        start_y = node.y - line_height * (len(lines) - 1) / 2
     spans = "".join(
         f'<tspan x="{text_x}" y="{start_y + i * line_height}">{html.escape(line)}</tspan>'
         for i, line in enumerate(lines)

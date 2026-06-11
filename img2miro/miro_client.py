@@ -6,6 +6,7 @@ tests run against a fake client.
 """
 
 import html
+import math
 from urllib.parse import quote
 
 import requests
@@ -25,9 +26,34 @@ FONT_FAMILIES = {
 MIN_FONT_SIZE, MAX_FONT_SIZE = 10, 288
 MIN_BORDER_WIDTH, MAX_BORDER_WIDTH = 1.0, 24.0
 
+# Rough text metrics used to keep text inside its shape.
+TEXT_PADDING = 10.0
+LINE_HEIGHT = 1.3
+CHAR_WIDTH = 0.55  # average glyph width as a fraction of font size
+
 
 def _clamp(value: float, low: float, high: float) -> float:
     return min(max(value, low), high)
+
+
+def _text_fits(text: str, font_size: float, avail_w: float, avail_h: float) -> bool:
+    lines = 0
+    for line in text.split("\n"):
+        line_px = max(len(line), 1) * CHAR_WIDTH * font_size
+        lines += max(1, math.ceil(line_px / avail_w))
+    return lines * font_size * LINE_HEIGHT <= avail_h
+
+
+def fitted_font_size(node: Node) -> int:
+    """Largest font size <= the extracted one whose wrapped text fits the shape."""
+    size = int(_clamp(node.font_size, MIN_FONT_SIZE, MAX_FONT_SIZE))
+    if not node.text:
+        return size
+    avail_w = max(node.width - 2 * TEXT_PADDING, 20.0)
+    avail_h = max(node.height - 2 * TEXT_PADDING, 12.0)
+    while size > MIN_FONT_SIZE and not _text_fits(node.text, size, avail_w, avail_h):
+        size -= 1
+    return size
 
 
 def content_html(text: str) -> str:
@@ -48,9 +74,9 @@ def shape_payload(node: Node) -> dict:
             "borderStyle": node.border_style,
             "color": node.text_color,
             "fontFamily": FONT_FAMILIES[node.font],
-            "fontSize": str(int(_clamp(node.font_size, MIN_FONT_SIZE, MAX_FONT_SIZE))),
+            "fontSize": str(fitted_font_size(node)),
             "textAlign": node.text_align,
-            "textAlignVertical": "middle",
+            "textAlignVertical": node.text_valign,
             # Without these (as strings), Miro creates the shapes invisible.
             "fillOpacity": "1.0",
             "borderOpacity": "1.0",
@@ -81,8 +107,10 @@ def push_diagram(client, diagram: Diagram) -> tuple[dict[str, str], int, list[Co
     Returns (node id -> Miro item id, connectors created, connectors skipped
     because an endpoint id didn't resolve to a created node).
     """
+    # Miro z-order follows creation order: create largest shapes first so
+    # containers sit behind the nodes drawn inside them.
     id_map: dict[str, str] = {}
-    for node in diagram.nodes:
+    for node in sorted(diagram.nodes, key=lambda n: n.width * n.height, reverse=True):
         id_map[node.id] = client.create_shape(shape_payload(node))
 
     created = 0

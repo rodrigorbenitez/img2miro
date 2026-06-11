@@ -5,6 +5,7 @@ import unittest
 from img2miro.miro_client import (
     connector_payload,
     content_html,
+    fitted_font_size,
     push_diagram,
     shape_payload,
 )
@@ -28,6 +29,7 @@ def make_node(node_id: str = "n1", **overrides) -> Node:
         font_size=14.0,
         font="sans",
         text_align="center",
+        text_valign="middle",
     )
     fields.update(overrides)
     return Node(**fields)
@@ -99,7 +101,8 @@ class ShapePayloadTests(unittest.TestCase):
 
     def test_font_size_clamped_to_miro_range(self):
         self.assertEqual(shape_payload(make_node(font_size=4.0))["style"]["fontSize"], "10")
-        self.assertEqual(shape_payload(make_node(font_size=999.0))["style"]["fontSize"], "288")
+        # Empty text skips auto-fit, so only the Miro max clamp applies
+        self.assertEqual(shape_payload(make_node(text="", font_size=999.0))["style"]["fontSize"], "288")
 
     def test_border_fields(self):
         payload = shape_payload(make_node(border_width=3.0, border_style="dashed"))
@@ -109,6 +112,34 @@ class ShapePayloadTests(unittest.TestCase):
     def test_border_width_clamped_to_miro_range(self):
         self.assertEqual(shape_payload(make_node(border_width=0.2))["style"]["borderWidth"], "1.0")
         self.assertEqual(shape_payload(make_node(border_width=80.0))["style"]["borderWidth"], "24.0")
+
+    def test_text_valign_from_node(self):
+        payload = shape_payload(make_node(text_valign="top"))
+        self.assertEqual(payload["style"]["textAlignVertical"], "top")
+
+
+class FittedFontSizeTests(unittest.TestCase):
+    def test_short_text_keeps_extracted_size(self):
+        self.assertEqual(fitted_font_size(make_node(text="OK", font_size=14.0)), 14)
+
+    def test_long_text_in_small_shape_shrinks(self):
+        node = make_node(
+            text="This is a very long label that cannot possibly fit "
+            "at the extracted size inside such a small shape",
+            font_size=24.0,
+            width=120.0,
+            height=50.0,
+        )
+        size = fitted_font_size(node)
+        self.assertLess(size, 24)
+        self.assertGreaterEqual(size, 10)
+
+    def test_never_shrinks_below_miro_minimum(self):
+        node = make_node(text="x" * 2000, font_size=14.0, width=40.0, height=30.0)
+        self.assertEqual(fitted_font_size(node), 10)
+
+    def test_empty_text_keeps_extracted_size(self):
+        self.assertEqual(fitted_font_size(make_node(text="", font_size=14.0)), 14)
 
 
 class ConnectorPayloadTests(unittest.TestCase):
@@ -140,6 +171,20 @@ class PushDiagramTests(unittest.TestCase):
         self.assertEqual(skipped, [])
         self.assertEqual(client.connectors[0]["startItem"], {"id": "miro_1"})
         self.assertEqual(client.connectors[0]["endItem"], {"id": "miro_2"})
+
+    def test_containers_created_before_children_for_z_order(self):
+        container = make_node("box", width=800.0, height=600.0, text_valign="top")
+        child = make_node("leaf", width=100.0, height=60.0)
+        diagram = Diagram(nodes=[child, container], connectors=[])
+        client = FakeMiroClient()
+        id_map, _, _ = push_diagram(client, diagram)
+
+        # Largest shape first regardless of extraction order
+        self.assertEqual(client.shapes[0]["geometry"], {"width": 800.0, "height": 600.0})
+        self.assertEqual(client.shapes[1]["geometry"], {"width": 100.0, "height": 60.0})
+        # id_map still maps both correctly
+        self.assertEqual(id_map["box"], "miro_1")
+        self.assertEqual(id_map["leaf"], "miro_2")
 
     def test_skips_connectors_with_unknown_endpoints(self):
         diagram = Diagram(

@@ -47,7 +47,28 @@ shapes with no visible fill.
 - border_width: the border thickness in pixels. border_style: 'dashed' or \
 'dotted' only if drawn that way.
 - One connector per arrow or line between shapes, with its label, exact \
-stroke color, and dash style.
+stroke color, and dash style. Every connector must join the two shapes the \
+original line visually joins — never an unrelated or distant shape.
+
+Complex diagrams — follow these rules strictly:
+- Containers and groups (large boxes that enclose other shapes, swimlanes, \
+zones) are nodes too. Give them their full bounds, their title as text, and \
+text_valign 'top' so the title sits at the top edge like in the image.
+- Every child shape must lie COMPLETELY inside its container's bounds: \
+child.x ± child.width/2 and child.y ± child.height/2 must stay within the \
+container's rectangle. Check the arithmetic.
+- Labels must be complete. Never cut text off mid-word or mid-sentence; if \
+text is long, capture all of it and size the shape generously enough to \
+hold it.
+- font_size must be small enough that the text plausibly fits inside the \
+shape's width and height.
+- If shapes appear aligned in a row or column in the image, give them \
+exactly the same y (row) or x (column) so the result is cleanly aligned.
+- Icons and technology logos (cloud services, databases, etc.) cannot be \
+reproduced: represent each as the closest shape (e.g. 'can' for a database) \
+with the technology's name as its text. Never emit a blank colored square.
+- Do not emit empty decorative shapes, unused containers, or text-less \
+placeholder boxes unless they genuinely appear in the image.
 """
 
 REFINE_PROMPT = """\
@@ -63,6 +84,16 @@ stroke color of every connector; correct any that are off.
 border_width, and border_style against what is actually drawn.
 - Structure: fix missing or hallucinated nodes, misplaced positions, and \
 misdirected or missing connectors.
+- Completeness: no label may end mid-word or mid-sentence; re-read the \
+image and complete any truncated text.
+- Containment: every child shape must lie fully inside its container's \
+bounds — verify the arithmetic and move or resize offenders.
+- Fit: font_size must be small enough for the text to fit the shape; \
+enlarge the shape or reduce font_size where text would overflow.
+- Alignment: shapes that form a row or column in the image must share \
+exactly the same y or x.
+- Remove orphaned, empty, or placeholder shapes that don't exist in the \
+image.
 
 Return the complete corrected diagram, not a diff.
 
