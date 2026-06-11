@@ -70,6 +70,11 @@ shapes with no visible fill.
 - One connector per arrow or line between shapes, with its label, exact \
 stroke color, and dash style. Every connector must join the two shapes the \
 original line visually joins — never an unrelated or distant shape.
+- from_side / to_side: report which side of each shape the line visibly \
+leaves and enters (left/right/top/bottom). This is CRITICAL when two shapes \
+are joined by more than one line (e.g. a forward arrow and a feedback \
+arrow): give each line its true sides so the routes stay distinct, exactly \
+as drawn. Use 'auto' only when the attachment point is genuinely unclear.
 
 Complex diagrams — follow these rules strictly:
 - Containers and groups (large boxes that enclose other shapes, swimlanes, \
@@ -125,6 +130,9 @@ separate entry in 'labels' positioned exactly as in the image (e.g. below \
 the icon) — never as text inside the square.
 - Labels: verify each label's position, width, font size, color, and \
 alignment against the image; add any standalone text that was missed.
+- Connector routing: verify from_side/to_side against where each line \
+actually attaches in the image; pairs of lines between the same two shapes \
+must keep distinct sides exactly as drawn.
 - Remove orphaned or placeholder shapes that don't exist in the image \
 (icon placeholder squares are expected and stay).
 

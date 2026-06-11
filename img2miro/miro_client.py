@@ -109,9 +109,18 @@ def text_payload(label: TextLabel) -> dict:
 
 
 def connector_payload(connector: Connector, id_map: dict[str, str]) -> dict:
+    start_item: dict = {"id": id_map[connector.from_id]}
+    end_item: dict = {"id": id_map[connector.to_id]}
+    # Pin endpoints to the side the line uses in the image; without this,
+    # Miro auto-snaps and parallel arrows (e.g. forward + feedback between
+    # the same two blocks) collapse onto the same path.
+    if connector.from_side != "auto":
+        start_item["snapTo"] = connector.from_side
+    if connector.to_side != "auto":
+        end_item["snapTo"] = connector.to_side
     payload = {
-        "startItem": {"id": id_map[connector.from_id]},
-        "endItem": {"id": id_map[connector.to_id]},
+        "startItem": start_item,
+        "endItem": end_item,
         "shape": connector.style,
         "style": {
             "strokeColor": connector.stroke_color,

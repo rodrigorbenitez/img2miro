@@ -59,6 +59,8 @@ def make_connector(**overrides) -> Connector:
     fields = dict(
         from_id="a",
         to_id="b",
+        from_side="auto",
+        to_side="auto",
         label="",
         style="straight",
         stroke_color="#555555",
@@ -195,6 +197,17 @@ class ConnectorPayloadTests(unittest.TestCase):
     def test_label_becomes_caption(self):
         payload = connector_payload(make_connector(label="yes"), {"a": "1", "b": "2"})
         self.assertEqual(payload["captions"], [{"content": "yes"}])
+
+    def test_sides_become_snap_to(self):
+        connector = make_connector(from_side="right", to_side="left")
+        payload = connector_payload(connector, {"a": "1", "b": "2"})
+        self.assertEqual(payload["startItem"], {"id": "1", "snapTo": "right"})
+        self.assertEqual(payload["endItem"], {"id": "2", "snapTo": "left"})
+
+    def test_auto_sides_omit_snap_to(self):
+        payload = connector_payload(make_connector(), {"a": "1", "b": "2"})
+        self.assertNotIn("snapTo", payload["startItem"])
+        self.assertNotIn("snapTo", payload["endItem"])
 
 
 class PushDiagramTests(unittest.TestCase):
