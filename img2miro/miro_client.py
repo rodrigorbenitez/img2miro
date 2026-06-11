@@ -26,21 +26,29 @@ FONT_FAMILIES = {
 MIN_FONT_SIZE, MAX_FONT_SIZE = 10, 288
 MIN_BORDER_WIDTH, MAX_BORDER_WIDTH = 1.0, 24.0
 
-# Rough text metrics used to keep text inside its shape.
+# Rough text metrics used to keep text inside its shape. Deliberately
+# conservative — Miro renders wider than the geometric average, and an
+# overestimate only costs a slightly smaller font while an underestimate
+# hides text behind the shape edge.
 TEXT_PADDING = 10.0
-LINE_HEIGHT = 1.3
-CHAR_WIDTH = 0.55  # average glyph width as a fraction of font size
+LINE_HEIGHT = 1.4
+CHAR_WIDTH = 0.62  # average glyph width as a fraction of font size
 
 
 def _clamp(value: float, low: float, high: float) -> float:
     return min(max(value, low), high)
 
 
-def _text_fits(text: str, font_size: float, avail_w: float, avail_h: float) -> bool:
+def wrapped_line_count(text: str, font_size: float, avail_w: float) -> int:
     lines = 0
     for line in text.split("\n"):
         line_px = max(len(line), 1) * CHAR_WIDTH * font_size
         lines += max(1, math.ceil(line_px / avail_w))
+    return lines
+
+
+def _text_fits(text: str, font_size: float, avail_w: float, avail_h: float) -> bool:
+    lines = wrapped_line_count(text, font_size, avail_w)
     return lines * font_size * LINE_HEIGHT <= avail_h
 
 

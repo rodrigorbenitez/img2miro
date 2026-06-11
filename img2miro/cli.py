@@ -9,6 +9,7 @@ import anthropic
 from dotenv import load_dotenv
 
 from .extractor import extract
+from .layout import normalize_layout
 from .miro_client import MiroClient, push_diagram
 from .preview import write_preview
 
@@ -51,6 +52,7 @@ def main(argv: list[str] | None = None) -> None:
 
     client = anthropic.Anthropic()
     diagram = extract(client, args.image, refine=args.refine)
+    diagram = normalize_layout(diagram)
     print(
         f"Extracted {len(diagram.nodes)} node(s) and "
         f"{len(diagram.connectors)} connector(s)."
