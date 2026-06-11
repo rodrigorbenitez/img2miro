@@ -22,12 +22,17 @@ cd img2miro
 pip install -e .
 ```
 
-### Credentials (`.env` file)
+### Credentials
 
-The tool reads two credentials from a `.env` file in the project root (or from environment variables, which take precedence). Copy the template and fill in your own values:
+The tool needs two credentials, `ANTHROPIC_API_KEY` and `MIRO_ACCESS_TOKEN`. You can provide them either with a `.env` file or as regular environment variables in your terminal — both work on every platform. If both are set, the environment variables win.
+
+**Option A — `.env` file (recommended: set once, works in every terminal)**
+
+Copy the template in the project root and fill in your own values:
 
 ```bash
-cp .env.example .env
+cp .env.example .env        # macOS/Linux
+copy .env.example .env      # Windows
 ```
 
 ```
@@ -35,7 +40,28 @@ ANTHROPIC_API_KEY=sk-ant-...
 MIRO_ACCESS_TOKEN=...
 ```
 
-Format rules: one `KEY=value` per line, no quotes, no spaces around the `=`.
+Format rules: one `KEY=value` per line, no quotes, no spaces around the `=`. Run the tool from the project directory (or a subdirectory) so the file is found.
+
+**Option B — environment variables in the terminal**
+
+macOS / Linux (bash or zsh):
+
+```bash
+export ANTHROPIC_API_KEY="sk-ant-..."
+export MIRO_ACCESS_TOKEN="your-miro-token"
+```
+
+Windows (PowerShell):
+
+```powershell
+$env:ANTHROPIC_API_KEY = "sk-ant-..."
+$env:MIRO_ACCESS_TOKEN = "your-miro-token"
+```
+
+These last only for the current terminal session. To make them permanent:
+
+- macOS / Linux: add the two `export` lines to your shell profile (`~/.zshrc` on macOS, `~/.bashrc` on most Linux), then open a new terminal.
+- Windows: run `setx ANTHROPIC_API_KEY "sk-ant-..."` and `setx MIRO_ACCESS_TOKEN "your-miro-token"`, then open a new terminal (`setx` does not affect the current one).
 
 **Getting the Anthropic API key**
 
@@ -58,7 +84,8 @@ You'll also need the **board id**: it's the part of the board URL after `/app/bo
 
 - `.env` is listed in `.gitignore`, so git never tracks it — your keys stay on your machine. Only `.env.example` (placeholders, no real values) is committed.
 - Never paste real keys into `README.md`, code, commits, or issues. If a key does leak, revoke and regenerate it (Anthropic Console → API Keys; Miro → your app settings).
-- Each machine you run the tool on needs its own local `.env` — the file deliberately does not travel through git.
+- Each machine you run the tool on needs its own credentials (its own `.env` or its own environment variables) — they deliberately do not travel through git.
+- Terminal-set variables are just as safe as `.env` as long as you avoid putting the `export`/`setx` lines (with real values) in files that get committed.
 
 ## Usage
 
