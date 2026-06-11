@@ -22,14 +22,43 @@ cd img2miro
 pip install -e .
 ```
 
-Create a `.env` file in the project root (see `.env.example`):
+### Credentials (`.env` file)
+
+The tool reads two credentials from a `.env` file in the project root (or from environment variables, which take precedence). Copy the template and fill in your own values:
+
+```bash
+cp .env.example .env
+```
 
 ```
 ANTHROPIC_API_KEY=sk-ant-...
 MIRO_ACCESS_TOKEN=...
 ```
 
-The Miro token needs the `boards:read` and `boards:write` scopes.
+Format rules: one `KEY=value` per line, no quotes, no spaces around the `=`.
+
+**Getting the Anthropic API key**
+
+1. Sign in at [console.anthropic.com](https://console.anthropic.com).
+2. Go to **API Keys** and create a new key.
+3. Copy it immediately (it's shown only once) — it starts with `sk-ant-`.
+
+Note that conversions consume paid API credits (see [Costs](#costs)).
+
+**Getting the Miro access token**
+
+1. Sign in at [miro.com](https://miro.com) and open the [Developer Apps page](https://miro.com/app/settings/user-profile/apps) (Profile settings → Your apps → Create new app).
+2. Create an app, and under **Permissions** enable the `boards:read` and `boards:write` scopes.
+3. Click **Install app and get OAuth token** and install it on the team that owns your target board.
+4. Copy the access token shown after installing.
+
+You'll also need the **board id**: it's the part of the board URL after `/app/board/`, e.g. for `https://miro.com/app/board/uXjVAbCdEfG=/` the id is `uXjVAbCdEfG=`.
+
+### Keeping credentials out of the repo
+
+- `.env` is listed in `.gitignore`, so git never tracks it — your keys stay on your machine. Only `.env.example` (placeholders, no real values) is committed.
+- Never paste real keys into `README.md`, code, commits, or issues. If a key does leak, revoke and regenerate it (Anthropic Console → API Keys; Miro → your app settings).
+- Each machine you run the tool on needs its own local `.env` — the file deliberately does not travel through git.
 
 ## Usage
 
