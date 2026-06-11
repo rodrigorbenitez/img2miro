@@ -24,25 +24,47 @@ MEDIA_TYPES = {
 }
 
 EXTRACT_PROMPT = """\
-Extract every element of this diagram so it can be rebuilt as editable items \
-on a whiteboard.
+Extract every element of this diagram so it can be rebuilt as a near-perfect \
+copy on a whiteboard. The rebuilt diagram must look like a mirror of the \
+original: same text, same colors, same sizes, same styles. Fidelity matters \
+more than anything else.
 
 - One node per visual shape or box. Use pixel coordinates from the image for \
 position (center) and size.
 - Pick the closest available shape type; plain boxes are 'rectangle' or \
 'round_rectangle'.
-- Capture text verbatim, including line breaks as spaces.
-- Sample the actual colors as hex values. If a shape has no visible fill, use \
-'#ffffff'.
-- One connector per arrow or line between shapes, with its label if any.
+- text: copy VERBATIM, character by character — exact casing, punctuation, \
+accents, numbers. Preserve line breaks as '\\n'. Never paraphrase, translate, \
+abbreviate, or fix typos.
+- font_size: the text height in image pixels (uppercase letter height is \
+roughly 70% of the font size).
+- text_align: how the text is aligned inside the shape (left/center/right).
+- font: 'serif' if the letters have serifs, 'handwritten' for script-like \
+text, otherwise 'sans'.
+- Colors: sample the actual pixels and report exact hex values — fill, \
+border, and text color independently (they often differ). Use '#ffffff' for \
+shapes with no visible fill.
+- border_width: the border thickness in pixels. border_style: 'dashed' or \
+'dotted' only if drawn that way.
+- One connector per arrow or line between shapes, with its label, exact \
+stroke color, and dash style.
 """
 
 REFINE_PROMPT = """\
-Below is a JSON extraction of this diagram. Compare it carefully against the \
-image and return a corrected version of the full JSON: fix missing or \
-hallucinated nodes, wrong text, wrong colors, misplaced or misdirected \
-connectors, and positions that don't match the layout. Return the complete \
-corrected diagram, not a diff.
+Below is a JSON extraction of this diagram. The goal is a near-perfect \
+mirror of the image. Audit it field by field against the image and return a \
+corrected version of the full JSON:
+
+- Text: compare character by character. Fix any paraphrasing, wrong casing, \
+missing punctuation, or lost line breaks ('\\n').
+- Colors: re-sample fill, border, and text colors of every node and the \
+stroke color of every connector; correct any that are off.
+- Sizes and styles: check font_size, text_align, font category, \
+border_width, and border_style against what is actually drawn.
+- Structure: fix missing or hallucinated nodes, misplaced positions, and \
+misdirected or missing connectors.
+
+Return the complete corrected diagram, not a diff.
 
 Current extraction:
 {json}

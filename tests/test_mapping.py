@@ -2,7 +2,12 @@
 
 import unittest
 
-from img2miro.miro_client import connector_payload, push_diagram, shape_payload
+from img2miro.miro_client import (
+    connector_payload,
+    content_html,
+    push_diagram,
+    shape_payload,
+)
 from img2miro.schema import Connector, Diagram, Node
 
 
@@ -17,10 +22,28 @@ def make_node(node_id: str = "n1", **overrides) -> Node:
         height=80.0,
         fill_color="#d5e8d4",
         border_color="#82b366",
+        border_width=2.0,
+        border_style="normal",
         text_color="#1a1a1a",
+        font_size=14.0,
+        font="sans",
+        text_align="center",
     )
     fields.update(overrides)
     return Node(**fields)
+
+
+def make_connector(**overrides) -> Connector:
+    fields = dict(
+        from_id="a",
+        to_id="b",
+        label="",
+        style="straight",
+        stroke_color="#555555",
+        stroke_style="normal",
+    )
+    fields.update(overrides)
+    return Connector(**fields)
 
 
 class FakeMiroClient:
@@ -37,10 +60,24 @@ class FakeMiroClient:
         return f"conn_{len(self.connectors)}"
 
 
+class ContentHtmlTests(unittest.TestCase):
+    def test_plain_text_wrapped_in_paragraph(self):
+        self.assertEqual(content_html("Start"), "<p>Start</p>")
+
+    def test_line_breaks_become_br(self):
+        self.assertEqual(content_html("line 1\nline 2"), "<p>line 1<br>line 2</p>")
+
+    def test_html_is_escaped(self):
+        self.assertEqual(content_html("a < b & c"), "<p>a &lt; b &amp; c</p>")
+
+    def test_empty_text(self):
+        self.assertEqual(content_html(""), "")
+
+
 class ShapePayloadTests(unittest.TestCase):
     def test_basic_fields(self):
         payload = shape_payload(make_node())
-        self.assertEqual(payload["data"], {"shape": "round_rectangle", "content": "Start"})
+        self.assertEqual(payload["data"], {"shape": "round_rectangle", "content": "<p>Start</p>"})
         self.assertEqual(payload["position"], {"x": 100.0, "y": 50.0})
         self.assertEqual(payload["geometry"], {"width": 160.0, "height": 80.0})
         self.assertEqual(payload["style"]["fillColor"], "#d5e8d4")
@@ -53,19 +90,39 @@ class ShapePayloadTests(unittest.TestCase):
         self.assertEqual(payload["style"]["fillOpacity"], "1.0")
         self.assertEqual(payload["style"]["borderOpacity"], "1.0")
 
+    def test_text_style_fields(self):
+        payload = shape_payload(make_node(font="serif", text_align="left", font_size=18.0))
+        self.assertEqual(payload["style"]["fontFamily"], "pt_serif")
+        self.assertEqual(payload["style"]["fontSize"], "18")
+        self.assertEqual(payload["style"]["textAlign"], "left")
+        self.assertEqual(payload["style"]["textAlignVertical"], "middle")
+
+    def test_font_size_clamped_to_miro_range(self):
+        self.assertEqual(shape_payload(make_node(font_size=4.0))["style"]["fontSize"], "10")
+        self.assertEqual(shape_payload(make_node(font_size=999.0))["style"]["fontSize"], "288")
+
+    def test_border_fields(self):
+        payload = shape_payload(make_node(border_width=3.0, border_style="dashed"))
+        self.assertEqual(payload["style"]["borderWidth"], "3.0")
+        self.assertEqual(payload["style"]["borderStyle"], "dashed")
+
+    def test_border_width_clamped_to_miro_range(self):
+        self.assertEqual(shape_payload(make_node(border_width=0.2))["style"]["borderWidth"], "1.0")
+        self.assertEqual(shape_payload(make_node(border_width=80.0))["style"]["borderWidth"], "24.0")
+
 
 class ConnectorPayloadTests(unittest.TestCase):
     def test_maps_ids_and_style(self):
-        connector = Connector(from_id="a", to_id="b", label="", style="elbowed")
+        connector = make_connector(style="elbowed", stroke_color="#ff0000", stroke_style="dashed")
         payload = connector_payload(connector, {"a": "miro_1", "b": "miro_2"})
         self.assertEqual(payload["startItem"], {"id": "miro_1"})
         self.assertEqual(payload["endItem"], {"id": "miro_2"})
         self.assertEqual(payload["shape"], "elbowed")
+        self.assertEqual(payload["style"], {"strokeColor": "#ff0000", "strokeStyle": "dashed"})
         self.assertNotIn("captions", payload)
 
     def test_label_becomes_caption(self):
-        connector = Connector(from_id="a", to_id="b", label="yes", style="straight")
-        payload = connector_payload(connector, {"a": "1", "b": "2"})
+        payload = connector_payload(make_connector(label="yes"), {"a": "1", "b": "2"})
         self.assertEqual(payload["captions"], [{"content": "yes"}])
 
 
@@ -73,7 +130,7 @@ class PushDiagramTests(unittest.TestCase):
     def test_pushes_shapes_then_connectors(self):
         diagram = Diagram(
             nodes=[make_node("a"), make_node("b", x=300.0)],
-            connectors=[Connector(from_id="a", to_id="b", label="", style="curved")],
+            connectors=[make_connector(style="curved")],
         )
         client = FakeMiroClient()
         id_map, created, skipped = push_diagram(client, diagram)
@@ -87,7 +144,7 @@ class PushDiagramTests(unittest.TestCase):
     def test_skips_connectors_with_unknown_endpoints(self):
         diagram = Diagram(
             nodes=[make_node("a")],
-            connectors=[Connector(from_id="a", to_id="ghost", label="", style="straight")],
+            connectors=[make_connector(to_id="ghost")],
         )
         client = FakeMiroClient()
         _, created, skipped = push_diagram(client, diagram)

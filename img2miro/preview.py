@@ -8,11 +8,24 @@ from .schema import Diagram, Node
 
 PADDING = 40
 
+FONT_STACKS = {
+    "sans": "sans-serif",
+    "serif": "serif",
+    "handwritten": "cursive",
+}
+
+DASH_ARRAYS = {
+    "normal": "",
+    "dashed": ' stroke-dasharray="8,4"',
+    "dotted": ' stroke-dasharray="2,3"',
+}
+
 
 def _node_svg(node: Node) -> str:
     x0, y0 = node.x - node.width / 2, node.y - node.height / 2
     style = (
-        f'fill="{node.fill_color}" stroke="{node.border_color}" stroke-width="2"'
+        f'fill="{node.fill_color}" stroke="{node.border_color}" '
+        f'stroke-width="{node.border_width}"{DASH_ARRAYS[node.border_style]}'
     )
     if node.shape == "circle":
         element = (
@@ -34,12 +47,31 @@ def _node_svg(node: Node) -> str:
             f'<rect x="{x0}" y="{y0}" width="{node.width}" '
             f'height="{node.height}"{rx} {style}/>'
         )
-    label = (
-        f'<text x="{node.x}" y="{node.y}" text-anchor="middle" '
-        f'dominant-baseline="middle" fill="{node.text_color}" '
-        f'font-family="sans-serif" font-size="13">{html.escape(node.text)}</text>'
+    return element + _text_svg(node, x0)
+
+
+def _text_svg(node: Node, x0: float) -> str:
+    if not node.text:
+        return ""
+    if node.text_align == "left":
+        anchor, text_x = "start", x0 + 8
+    elif node.text_align == "right":
+        anchor, text_x = "end", x0 + node.width - 8
+    else:
+        anchor, text_x = "middle", node.x
+
+    lines = node.text.split("\n")
+    line_height = node.font_size * 1.25
+    start_y = node.y - line_height * (len(lines) - 1) / 2
+    spans = "".join(
+        f'<tspan x="{text_x}" y="{start_y + i * line_height}">{html.escape(line)}</tspan>'
+        for i, line in enumerate(lines)
     )
-    return element + label
+    return (
+        f'<text text-anchor="{anchor}" dominant-baseline="middle" '
+        f'fill="{node.text_color}" font-family="{FONT_STACKS[node.font]}" '
+        f'font-size="{node.font_size}">{spans}</text>'
+    )
 
 
 def render_svg(diagram: Diagram) -> str:
@@ -63,14 +95,16 @@ def render_svg(diagram: Diagram) -> str:
             continue
         (x1, y1), (x2, y2) = centers[c.from_id], centers[c.to_id]
         parts.append(
-            f'<line x1="{x1}" y1="{y1}" x2="{x2}" y2="{y2}" stroke="#555" '
-            'stroke-width="1.5" marker-end="url(#arrow)"/>'
+            f'<line x1="{x1}" y1="{y1}" x2="{x2}" y2="{y2}" '
+            f'stroke="{c.stroke_color}" stroke-width="1.5"'
+            f'{DASH_ARRAYS[c.stroke_style]} marker-end="url(#arrow)"/>'
         )
         if c.label:
             parts.append(
                 f'<text x="{(x1 + x2) / 2}" y="{(y1 + y2) / 2 - 5}" '
-                'text-anchor="middle" fill="#555" font-family="sans-serif" '
-                f'font-size="11">{html.escape(c.label)}</text>'
+                f'text-anchor="middle" fill="{c.stroke_color}" '
+                'font-family="sans-serif" font-size="11">'
+                f"{html.escape(c.label)}</text>"
             )
 
     parts.extend(_node_svg(n) for n in diagram.nodes)
