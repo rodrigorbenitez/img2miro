@@ -1,0 +1,21 @@
+[project]
+name = "img2miro"
+version = "0.1.0"
+description = "Convert a diagram image into editable Miro board items"
+requires-python = ">=3.10"
+dependencies = [
+    "anthropic",
+    "requests",
+    "pydantic>=2",
+    "python-dotenv",
+]
+
+[project.scripts]
+img2miro = "img2miro.cli:main"
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["img2miro*"]
