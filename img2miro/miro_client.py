@@ -108,23 +108,42 @@ def text_payload(label: TextLabel) -> dict:
     }
 
 
-def connector_payload(connector: Connector, id_map: dict[str, str]) -> dict:
-    start_item: dict = {"id": id_map[connector.from_id]}
-    end_item: dict = {"id": id_map[connector.to_id]}
-    # Pin endpoints to the side the line uses in the image; without this,
-    # Miro auto-snaps and parallel arrows (e.g. forward + feedback between
-    # the same two blocks) collapse onto the same path.
-    if connector.from_side != "auto":
-        start_item["snapTo"] = connector.from_side
-    if connector.to_side != "auto":
-        end_item["snapTo"] = connector.to_side
+def _relative_position(px: float, py: float, node: Node) -> dict:
+    """Image-pixel attachment point -> Miro percentage position on the item."""
+    rx = (px - (node.x - node.width / 2)) / node.width
+    ry = (py - (node.y - node.height / 2)) / node.height
+    return {
+        "x": f"{_clamp(rx, 0.0, 1.0) * 100:.1f}%",
+        "y": f"{_clamp(ry, 0.0, 1.0) * 100:.1f}%",
+    }
+
+
+def connector_payload(
+    connector: Connector, id_map: dict[str, str], nodes: dict[str, Node]
+) -> dict:
+    # Pin both endpoints to the exact spots where the line touches each
+    # shape in the image. Without this, Miro auto-snaps and parallel arrows
+    # (e.g. forward + feedback between the same two blocks) collapse onto
+    # the same path.
     payload = {
-        "startItem": start_item,
-        "endItem": end_item,
+        "startItem": {
+            "id": id_map[connector.from_id],
+            "position": _relative_position(
+                connector.from_x, connector.from_y, nodes[connector.from_id]
+            ),
+        },
+        "endItem": {
+            "id": id_map[connector.to_id],
+            "position": _relative_position(
+                connector.to_x, connector.to_y, nodes[connector.to_id]
+            ),
+        },
         "shape": connector.style,
         "style": {
             "strokeColor": connector.stroke_color,
             "strokeStyle": connector.stroke_style,
+            "startStrokeCap": "stealth" if connector.start_arrow else "none",
+            "endStrokeCap": "stealth" if connector.end_arrow else "none",
         },
     }
     if connector.label:
@@ -148,11 +167,12 @@ def push_diagram(client, diagram: Diagram) -> tuple[dict[str, str], int, list[Co
     for label in diagram.labels:
         client.create_text(text_payload(label))
 
+    nodes_by_id = {node.id: node for node in diagram.nodes}
     created = 0
     skipped: list[Connector] = []
     for connector in diagram.connectors:
         if connector.from_id in id_map and connector.to_id in id_map:
-            client.create_connector(connector_payload(connector, id_map))
+            client.create_connector(connector_payload(connector, id_map, nodes_by_id))
             created += 1
         else:
             skipped.append(connector)

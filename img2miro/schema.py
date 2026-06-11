@@ -28,7 +28,6 @@ ShapeType = Literal[
 ]
 
 ConnectorStyle = Literal["straight", "elbowed", "curved"]
-ConnectorSide = Literal["auto", "left", "right", "top", "bottom"]
 FontCategory = Literal["sans", "serif", "handwritten"]
 TextAlign = Literal["left", "center", "right"]
 TextValign = Literal["top", "middle", "bottom"]
@@ -94,19 +93,25 @@ class TextLabel(StrictModel):
 
 
 class Connector(StrictModel):
-    from_id: str = Field(description="id of the source node")
-    to_id: str = Field(description="id of the target node")
-    from_side: ConnectorSide = Field(
-        description=(
-            "Side of the source shape the line visibly leaves from in the "
-            "image (left/right/top/bottom); 'auto' only if unclear"
-        )
+    from_id: str = Field(description="id of the source node (the arrow's tail)")
+    to_id: str = Field(description="id of the target node (the arrow's head)")
+    from_x: float = Field(
+        description="Exact pixel x where the line touches the source shape in the image"
     )
-    to_side: ConnectorSide = Field(
-        description=(
-            "Side of the target shape the line visibly enters in the image "
-            "(left/right/top/bottom); 'auto' only if unclear"
-        )
+    from_y: float = Field(
+        description="Exact pixel y where the line touches the source shape in the image"
+    )
+    to_x: float = Field(
+        description="Exact pixel x where the line touches the target shape in the image"
+    )
+    to_y: float = Field(
+        description="Exact pixel y where the line touches the target shape in the image"
+    )
+    start_arrow: bool = Field(
+        description="True if an arrowhead is drawn at the source end of the line"
+    )
+    end_arrow: bool = Field(
+        description="True if an arrowhead is drawn at the target end of the line"
     )
     label: str = Field(description="Label on the connector; empty string if none")
     style: ConnectorStyle = Field(description="Line routing style")

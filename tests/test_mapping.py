@@ -56,11 +56,17 @@ def make_diagram(nodes=(), labels=(), connectors=()) -> Diagram:
 
 
 def make_connector(**overrides) -> Connector:
+    # Defaults match make_node geometry: 'a' at (100,50) 160x80 (right edge
+    # x=180), 'b' assumed at (300,50) 160x80 (left edge x=220).
     fields = dict(
         from_id="a",
         to_id="b",
-        from_side="auto",
-        to_side="auto",
+        from_x=180.0,
+        from_y=50.0,
+        to_x=220.0,
+        to_y=50.0,
+        start_arrow=False,
+        end_arrow=True,
         label="",
         style="straight",
         stroke_color="#555555",
@@ -68,6 +74,10 @@ def make_connector(**overrides) -> Connector:
     )
     fields.update(overrides)
     return Connector(**fields)
+
+
+def make_nodes_by_id() -> dict:
+    return {"a": make_node("a"), "b": make_node("b", x=300.0)}
 
 
 class FakeMiroClient:
@@ -187,27 +197,55 @@ class TextPayloadTests(unittest.TestCase):
 class ConnectorPayloadTests(unittest.TestCase):
     def test_maps_ids_and_style(self):
         connector = make_connector(style="elbowed", stroke_color="#ff0000", stroke_style="dashed")
-        payload = connector_payload(connector, {"a": "miro_1", "b": "miro_2"})
-        self.assertEqual(payload["startItem"], {"id": "miro_1"})
-        self.assertEqual(payload["endItem"], {"id": "miro_2"})
+        payload = connector_payload(connector, {"a": "miro_1", "b": "miro_2"}, make_nodes_by_id())
+        self.assertEqual(payload["startItem"]["id"], "miro_1")
+        self.assertEqual(payload["endItem"]["id"], "miro_2")
         self.assertEqual(payload["shape"], "elbowed")
-        self.assertEqual(payload["style"], {"strokeColor": "#ff0000", "strokeStyle": "dashed"})
+        self.assertEqual(payload["style"]["strokeColor"], "#ff0000")
+        self.assertEqual(payload["style"]["strokeStyle"], "dashed")
         self.assertNotIn("captions", payload)
 
     def test_label_becomes_caption(self):
-        payload = connector_payload(make_connector(label="yes"), {"a": "1", "b": "2"})
+        payload = connector_payload(make_connector(label="yes"), {"a": "1", "b": "2"}, make_nodes_by_id())
         self.assertEqual(payload["captions"], [{"content": "yes"}])
 
-    def test_sides_become_snap_to(self):
-        connector = make_connector(from_side="right", to_side="left")
-        payload = connector_payload(connector, {"a": "1", "b": "2"})
-        self.assertEqual(payload["startItem"], {"id": "1", "snapTo": "right"})
-        self.assertEqual(payload["endItem"], {"id": "2", "snapTo": "left"})
+    def test_exact_endpoints_become_relative_positions(self):
+        # 'a' spans x 20..180, y 10..90; touching its right edge mid-height
+        payload = connector_payload(make_connector(), {"a": "1", "b": "2"}, make_nodes_by_id())
+        self.assertEqual(payload["startItem"]["position"], {"x": "100.0%", "y": "50.0%"})
+        # 'b' spans x 220..380; touching its left edge mid-height
+        self.assertEqual(payload["endItem"]["position"], {"x": "0.0%", "y": "50.0%"})
 
-    def test_auto_sides_omit_snap_to(self):
-        payload = connector_payload(make_connector(), {"a": "1", "b": "2"})
-        self.assertNotIn("snapTo", payload["startItem"])
-        self.assertNotIn("snapTo", payload["endItem"])
+    def test_endpoints_outside_bounds_are_clamped(self):
+        payload = connector_payload(
+            make_connector(from_x=0.0, from_y=200.0), {"a": "1", "b": "2"}, make_nodes_by_id()
+        )
+        self.assertEqual(payload["startItem"]["position"], {"x": "0.0%", "y": "100.0%"})
+
+    def test_arrowheads_map_to_stroke_caps(self):
+        payload = connector_payload(make_connector(), {"a": "1", "b": "2"}, make_nodes_by_id())
+        self.assertEqual(payload["style"]["startStrokeCap"], "none")
+        self.assertEqual(payload["style"]["endStrokeCap"], "stealth")
+
+    def test_double_headed_arrow(self):
+        connector = make_connector(start_arrow=True, end_arrow=True)
+        payload = connector_payload(connector, {"a": "1", "b": "2"}, make_nodes_by_id())
+        self.assertEqual(payload["style"]["startStrokeCap"], "stealth")
+        self.assertEqual(payload["style"]["endStrokeCap"], "stealth")
+
+    def test_parallel_arrows_keep_distinct_attachment_points(self):
+        forward = make_connector(from_y=30.0, to_y=30.0)
+        feedback = make_connector(
+            from_id="b", to_id="a", from_x=220.0, from_y=70.0, to_x=180.0, to_y=70.0
+        )
+        id_map, nodes = {"a": "1", "b": "2"}, make_nodes_by_id()
+        p_fwd = connector_payload(forward, id_map, nodes)
+        p_back = connector_payload(feedback, id_map, nodes)
+        self.assertNotEqual(
+            p_fwd["startItem"]["position"], p_back["endItem"]["position"]
+        )
+        self.assertEqual(p_fwd["startItem"]["position"]["y"], "25.0%")
+        self.assertEqual(p_back["endItem"]["position"]["y"], "75.0%")
 
 
 class PushDiagramTests(unittest.TestCase):
@@ -222,8 +260,8 @@ class PushDiagramTests(unittest.TestCase):
         self.assertEqual(id_map, {"a": "miro_1", "b": "miro_2"})
         self.assertEqual(created, 1)
         self.assertEqual(skipped, [])
-        self.assertEqual(client.connectors[0]["startItem"], {"id": "miro_1"})
-        self.assertEqual(client.connectors[0]["endItem"], {"id": "miro_2"})
+        self.assertEqual(client.connectors[0]["startItem"]["id"], "miro_1")
+        self.assertEqual(client.connectors[0]["endItem"]["id"], "miro_2")
 
     def test_labels_created_as_text_items(self):
         diagram = make_diagram(

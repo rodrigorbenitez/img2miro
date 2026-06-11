@@ -67,14 +67,18 @@ border, and text color independently (they often differ). Use '#ffffff' for \
 shapes with no visible fill.
 - border_width: the border thickness in pixels. border_style: 'dashed' or \
 'dotted' only if drawn that way.
-- One connector per arrow or line between shapes, with its label, exact \
-stroke color, and dash style. Every connector must join the two shapes the \
-original line visually joins — never an unrelated or distant shape.
-- from_side / to_side: report which side of each shape the line visibly \
-leaves and enters (left/right/top/bottom). This is CRITICAL when two shapes \
-are joined by more than one line (e.g. a forward arrow and a feedback \
-arrow): give each line its true sides so the routes stay distinct, exactly \
-as drawn. Use 'auto' only when the attachment point is genuinely unclear.
+- One connector PER DRAWN LINE. If two shapes are joined by two separate \
+arrows (e.g. a forward arrow and a feedback arrow), emit TWO connectors — \
+NEVER merge them into one. A single line with arrowheads on both ends is \
+ONE connector with start_arrow and end_arrow both true.
+- from_x/from_y and to_x/to_y: the exact pixel coordinates where the line \
+visibly touches the source shape and the target shape. 'from' is the tail \
+of the arrow, 'to' is the head — direction matters.
+- start_arrow / end_arrow: whether an arrowhead is drawn at each end of \
+the line.
+- Each connector also carries its label, exact stroke color, and dash \
+style, and must join the two shapes the original line visually joins — \
+never an unrelated or distant shape.
 
 Complex diagrams — follow these rules strictly:
 - Containers and groups (large boxes that enclose other shapes, swimlanes, \
@@ -130,9 +134,12 @@ separate entry in 'labels' positioned exactly as in the image (e.g. below \
 the icon) — never as text inside the square.
 - Labels: verify each label's position, width, font size, color, and \
 alignment against the image; add any standalone text that was missed.
-- Connector routing: verify from_side/to_side against where each line \
-actually attaches in the image; pairs of lines between the same two shapes \
-must keep distinct sides exactly as drawn.
+- Connectors: there must be exactly as many connectors as drawn lines — \
+re-count them in the image. Verify each one's endpoint coordinates \
+(from_x/from_y, to_x/to_y) against where the line actually touches the \
+shapes, its direction (tail vs arrowhead), and its arrowheads \
+(start_arrow/end_arrow). Two arrows between the same two shapes must stay \
+two separate connectors with their own distinct endpoints.
 - Remove orphaned or placeholder shapes that don't exist in the image \
 (icon placeholder squares are expected and stay).
 
