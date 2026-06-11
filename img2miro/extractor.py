@@ -13,7 +13,7 @@ import anthropic
 
 from .schema import Diagram
 
-MODEL = "claude-opus-4-8"
+MODEL = "claude-fable-5"
 
 MEDIA_TYPES = {
     ".png": "image/png",
@@ -145,6 +145,11 @@ def _call(client: anthropic.Anthropic, content: list[dict]) -> Diagram:
             print(".", end="", flush=True)
         message = stream.get_final_message()
     print(flush=True)
+    if message.stop_reason == "refusal":
+        raise RuntimeError(
+            "The model declined to process this image (stop_reason=refusal). "
+            "Try a different image."
+        )
     text = next(b.text for b in message.content if b.type == "text")
     return Diagram.model_validate_json(text)
 

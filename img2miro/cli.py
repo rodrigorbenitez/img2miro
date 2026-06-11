@@ -11,7 +11,6 @@ from dotenv import load_dotenv
 from .extractor import extract
 from .layout import normalize_layout
 from .miro_client import MiroClient, push_diagram
-from .preview import write_preview
 
 DEFAULT_BOARD = "uXjVHGiQvmg="
 
@@ -30,9 +29,6 @@ def main(argv: list[str] | None = None) -> None:
         action=argparse.BooleanOptionalAction,
         default=True,
         help="Run a second vision pass to correct the extraction (default: on)",
-    )
-    parser.add_argument(
-        "--yes", "-y", action="store_true", help="Skip preview confirmation"
     )
     args = parser.parse_args(argv)
 
@@ -58,13 +54,6 @@ def main(argv: list[str] | None = None) -> None:
         f"{len(diagram.labels)} text label(s) and "
         f"{len(diagram.connectors)} connector(s)."
     )
-
-    preview_path = write_preview(diagram)
-    print(f"Preview written to: {preview_path}")
-    if not args.yes:
-        answer = input("Push to Miro board? [y/N] ").strip().lower()
-        if answer not in ("y", "yes"):
-            sys.exit("Aborted.")
 
     miro = MiroClient(os.environ["MIRO_ACCESS_TOKEN"], args.board)
     id_map, created, skipped = push_diagram(miro, diagram)
