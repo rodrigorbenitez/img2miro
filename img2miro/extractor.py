@@ -64,11 +64,18 @@ hold it.
 shape's width and height.
 - If shapes appear aligned in a row or column in the image, give them \
 exactly the same y (row) or x (column) so the result is cleanly aligned.
-- Icons and technology logos (cloud services, databases, etc.) cannot be \
-reproduced: represent each as the closest shape (e.g. 'can' for a database) \
-with the technology's name as its text. Never emit a blank colored square.
-- Do not emit empty decorative shapes, unused containers, or text-less \
-placeholder boxes unless they genuinely appear in the image.
+- Icons and logos (cloud services, products, etc.) cannot be reproduced. \
+Emit each one as a plain 'rectangle' node with EMPTY text (''), at the \
+icon's exact position and size, filled with the icon's dominant color. \
+NEVER put the icon's caption or name inside this square.
+- Any text printed near an icon (its name below, above, or beside it), and \
+any standalone text not enclosed by a shape (titles, annotations, legend \
+entries), goes in 'labels' — each at its exact pixel position with its own \
+size, color, font, and alignment. If a caption sits below an icon in the \
+image, the label's y must place it below the icon's square, exactly \
+mirroring the image.
+- Do not emit empty decorative shapes or unused containers unless they \
+genuinely appear in the image (icon placeholder squares are the exception).
 """
 
 REFINE_PROMPT = """\
@@ -92,8 +99,13 @@ bounds — verify the arithmetic and move or resize offenders.
 enlarge the shape or reduce font_size where text would overflow.
 - Alignment: shapes that form a row or column in the image must share \
 exactly the same y or x.
-- Remove orphaned, empty, or placeholder shapes that don't exist in the \
-image.
+- Icons: each icon/logo must be an empty square node, with its caption as a \
+separate entry in 'labels' positioned exactly as in the image (e.g. below \
+the icon) — never as text inside the square.
+- Labels: verify each label's position, width, font size, color, and \
+alignment against the image; add any standalone text that was missed.
+- Remove orphaned or placeholder shapes that don't exist in the image \
+(icon placeholder squares are expected and stay).
 
 Return the complete corrected diagram, not a diff.
 

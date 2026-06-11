@@ -73,6 +73,25 @@ class Node(StrictModel):
     )
 
 
+class TextLabel(StrictModel):
+    """Standalone text not enclosed by a shape: icon captions, titles,
+    annotations, legend entries. Rendered as a Miro text item at its exact
+    position so the layout mirrors the image."""
+
+    text: str = Field(
+        description="The text, copied VERBATIM. Preserve line breaks as '\\n'."
+    )
+    x: float = Field(description="Center x of the text block in image pixels")
+    y: float = Field(description="Center y of the text block in image pixels")
+    width: float = Field(description="Width of the text block in pixels")
+    font_size: float = Field(description="Font size in image pixels")
+    font: FontCategory = Field(
+        description="'serif' if letters have serifs, 'handwritten' for script-like text, else 'sans'"
+    )
+    color: str = Field(description="Exact hex text color, e.g. '#1a1a1a'")
+    text_align: TextAlign = Field(description="Horizontal alignment of the text")
+
+
 class Connector(StrictModel):
     from_id: str = Field(description="id of the source node")
     to_id: str = Field(description="id of the target node")
@@ -86,4 +105,5 @@ class Connector(StrictModel):
 
 class Diagram(StrictModel):
     nodes: list[Node]
+    labels: list[TextLabel]
     connectors: list[Connector]

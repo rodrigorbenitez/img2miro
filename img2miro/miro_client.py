@@ -11,7 +11,7 @@ from urllib.parse import quote
 
 import requests
 
-from .schema import Connector, Diagram, Node
+from .schema import Connector, Diagram, Node, TextLabel
 
 API_BASE = "https://api.miro.com/v2"
 
@@ -94,6 +94,20 @@ def shape_payload(node: Node) -> dict:
     }
 
 
+def text_payload(label: TextLabel) -> dict:
+    return {
+        "data": {"content": content_html(label.text)},
+        "style": {
+            "color": label.color,
+            "fontFamily": FONT_FAMILIES[label.font],
+            "fontSize": str(int(_clamp(label.font_size, MIN_FONT_SIZE, MAX_FONT_SIZE))),
+            "textAlign": label.text_align,
+        },
+        "position": {"x": label.x, "y": label.y},
+        "geometry": {"width": max(label.width, 10.0)},
+    }
+
+
 def connector_payload(connector: Connector, id_map: dict[str, str]) -> dict:
     payload = {
         "startItem": {"id": id_map[connector.from_id]},
@@ -116,10 +130,14 @@ def push_diagram(client, diagram: Diagram) -> tuple[dict[str, str], int, list[Co
     because an endpoint id didn't resolve to a created node).
     """
     # Miro z-order follows creation order: create largest shapes first so
-    # containers sit behind the nodes drawn inside them.
+    # containers sit behind the nodes drawn inside them, and text labels
+    # last so they sit on top of everything.
     id_map: dict[str, str] = {}
     for node in sorted(diagram.nodes, key=lambda n: n.width * n.height, reverse=True):
         id_map[node.id] = client.create_shape(shape_payload(node))
+
+    for label in diagram.labels:
+        client.create_text(text_payload(label))
 
     created = 0
     skipped: list[Connector] = []
@@ -146,6 +164,9 @@ class MiroClient:
 
     def create_shape(self, payload: dict) -> str:
         return self._post("shapes", payload)
+
+    def create_text(self, payload: dict) -> str:
+        return self._post("texts", payload)
 
     def create_connector(self, payload: dict) -> str:
         return self._post("connectors", payload)

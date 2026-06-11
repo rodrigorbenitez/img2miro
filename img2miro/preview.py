@@ -4,7 +4,7 @@ import html
 import tempfile
 from pathlib import Path
 
-from .schema import Diagram, Node
+from .schema import Diagram, Node, TextLabel
 
 PADDING = 40
 
@@ -79,12 +79,35 @@ def _text_svg(node: Node, x0: float) -> str:
     )
 
 
-def render_svg(diagram: Diagram) -> str:
-    if diagram.nodes:
-        max_x = max(n.x + n.width / 2 for n in diagram.nodes) + PADDING
-        max_y = max(n.y + n.height / 2 for n in diagram.nodes) + PADDING
+def _label_svg(label: TextLabel) -> str:
+    if label.text_align == "left":
+        anchor, text_x = "start", label.x - label.width / 2
+    elif label.text_align == "right":
+        anchor, text_x = "end", label.x + label.width / 2
     else:
-        max_x = max_y = 2 * PADDING
+        anchor, text_x = "middle", label.x
+
+    lines = label.text.split("\n")
+    line_height = label.font_size * 1.25
+    start_y = label.y - line_height * (len(lines) - 1) / 2
+    spans = "".join(
+        f'<tspan x="{text_x}" y="{start_y + i * line_height}">{html.escape(line)}</tspan>'
+        for i, line in enumerate(lines)
+    )
+    return (
+        f'<text text-anchor="{anchor}" dominant-baseline="middle" '
+        f'fill="{label.color}" font-family="{FONT_STACKS[label.font]}" '
+        f'font-size="{label.font_size}">{spans}</text>'
+    )
+
+
+def render_svg(diagram: Diagram) -> str:
+    xs = [n.x + n.width / 2 for n in diagram.nodes]
+    xs += [l.x + l.width / 2 for l in diagram.labels]
+    ys = [n.y + n.height / 2 for n in diagram.nodes]
+    ys += [l.y + l.font_size for l in diagram.labels]
+    max_x = (max(xs) if xs else PADDING) + PADDING
+    max_y = (max(ys) if ys else PADDING) + PADDING
 
     centers = {n.id: (n.x, n.y) for n in diagram.nodes}
     parts = [
@@ -113,6 +136,7 @@ def render_svg(diagram: Diagram) -> str:
             )
 
     parts.extend(_node_svg(n) for n in diagram.nodes)
+    parts.extend(_label_svg(l) for l in diagram.labels)
     parts.append("</svg>")
     return "\n".join(parts)
 

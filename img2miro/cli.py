@@ -54,7 +54,8 @@ def main(argv: list[str] | None = None) -> None:
     diagram = extract(client, args.image, refine=args.refine)
     diagram = normalize_layout(diagram)
     print(
-        f"Extracted {len(diagram.nodes)} node(s) and "
+        f"Extracted {len(diagram.nodes)} node(s), "
+        f"{len(diagram.labels)} text label(s) and "
         f"{len(diagram.connectors)} connector(s)."
     )
 
@@ -67,7 +68,10 @@ def main(argv: list[str] | None = None) -> None:
 
     miro = MiroClient(os.environ["MIRO_ACCESS_TOKEN"], args.board)
     id_map, created, skipped = push_diagram(miro, diagram)
-    print(f"Created {len(id_map)} shape(s) and {created} connector(s).")
+    print(
+        f"Created {len(id_map)} shape(s), {len(diagram.labels)} text item(s) "
+        f"and {created} connector(s)."
+    )
     for connector in skipped:
         print(
             f"Warning: skipped connector {connector.from_id} -> {connector.to_id} "

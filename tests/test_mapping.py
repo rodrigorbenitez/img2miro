@@ -8,8 +8,9 @@ from img2miro.miro_client import (
     fitted_font_size,
     push_diagram,
     shape_payload,
+    text_payload,
 )
-from img2miro.schema import Connector, Diagram, Node
+from img2miro.schema import Connector, Diagram, Node, TextLabel
 
 
 def make_node(node_id: str = "n1", **overrides) -> Node:
@@ -35,6 +36,25 @@ def make_node(node_id: str = "n1", **overrides) -> Node:
     return Node(**fields)
 
 
+def make_label(**overrides) -> TextLabel:
+    fields = dict(
+        text="DynamoDB",
+        x=100.0,
+        y=120.0,
+        width=90.0,
+        font_size=12.0,
+        font="sans",
+        color="#333333",
+        text_align="center",
+    )
+    fields.update(overrides)
+    return TextLabel(**fields)
+
+
+def make_diagram(nodes=(), labels=(), connectors=()) -> Diagram:
+    return Diagram(nodes=list(nodes), labels=list(labels), connectors=list(connectors))
+
+
 def make_connector(**overrides) -> Connector:
     fields = dict(
         from_id="a",
@@ -51,11 +71,16 @@ def make_connector(**overrides) -> Connector:
 class FakeMiroClient:
     def __init__(self):
         self.shapes: list[dict] = []
+        self.texts: list[dict] = []
         self.connectors: list[dict] = []
 
     def create_shape(self, payload: dict) -> str:
         self.shapes.append(payload)
         return f"miro_{len(self.shapes)}"
+
+    def create_text(self, payload: dict) -> str:
+        self.texts.append(payload)
+        return f"text_{len(self.texts)}"
 
     def create_connector(self, payload: dict) -> str:
         self.connectors.append(payload)
@@ -142,6 +167,21 @@ class FittedFontSizeTests(unittest.TestCase):
         self.assertEqual(fitted_font_size(make_node(text="", font_size=14.0)), 14)
 
 
+class TextPayloadTests(unittest.TestCase):
+    def test_basic_fields(self):
+        payload = text_payload(make_label())
+        self.assertEqual(payload["data"], {"content": "<p>DynamoDB</p>"})
+        self.assertEqual(payload["position"], {"x": 100.0, "y": 120.0})
+        self.assertEqual(payload["geometry"], {"width": 90.0})
+        self.assertEqual(payload["style"]["color"], "#333333")
+        self.assertEqual(payload["style"]["fontSize"], "12")
+        self.assertEqual(payload["style"]["fontFamily"], "open_sans")
+        self.assertEqual(payload["style"]["textAlign"], "center")
+
+    def test_font_size_clamped(self):
+        self.assertEqual(text_payload(make_label(font_size=4.0))["style"]["fontSize"], "10")
+
+
 class ConnectorPayloadTests(unittest.TestCase):
     def test_maps_ids_and_style(self):
         connector = make_connector(style="elbowed", stroke_color="#ff0000", stroke_style="dashed")
@@ -159,7 +199,7 @@ class ConnectorPayloadTests(unittest.TestCase):
 
 class PushDiagramTests(unittest.TestCase):
     def test_pushes_shapes_then_connectors(self):
-        diagram = Diagram(
+        diagram = make_diagram(
             nodes=[make_node("a"), make_node("b", x=300.0)],
             connectors=[make_connector(style="curved")],
         )
@@ -172,10 +212,20 @@ class PushDiagramTests(unittest.TestCase):
         self.assertEqual(client.connectors[0]["startItem"], {"id": "miro_1"})
         self.assertEqual(client.connectors[0]["endItem"], {"id": "miro_2"})
 
+    def test_labels_created_as_text_items(self):
+        diagram = make_diagram(
+            nodes=[make_node("icon", text="")],
+            labels=[make_label()],
+        )
+        client = FakeMiroClient()
+        push_diagram(client, diagram)
+        self.assertEqual(len(client.texts), 1)
+        self.assertEqual(client.texts[0]["data"]["content"], "<p>DynamoDB</p>")
+
     def test_containers_created_before_children_for_z_order(self):
         container = make_node("box", width=800.0, height=600.0, text_valign="top")
         child = make_node("leaf", width=100.0, height=60.0)
-        diagram = Diagram(nodes=[child, container], connectors=[])
+        diagram = make_diagram(nodes=[child, container])
         client = FakeMiroClient()
         id_map, _, _ = push_diagram(client, diagram)
 
@@ -187,7 +237,7 @@ class PushDiagramTests(unittest.TestCase):
         self.assertEqual(id_map["leaf"], "miro_2")
 
     def test_skips_connectors_with_unknown_endpoints(self):
-        diagram = Diagram(
+        diagram = make_diagram(
             nodes=[make_node("a")],
             connectors=[make_connector(to_id="ghost")],
         )

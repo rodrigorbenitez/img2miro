@@ -1,11 +1,10 @@
-"""Unit tests for post-extraction layout normalization."""
+﻿"""Unit tests for post-extraction layout normalization."""
 
 import unittest
 
 from img2miro.layout import normalize_layout
-from img2miro.schema import Diagram
 
-from test_mapping import make_node
+from test_mapping import make_diagram, make_node
 
 
 def bounds(node):
@@ -19,23 +18,36 @@ def bounds(node):
 
 class ExpandForTextTests(unittest.TestCase):
     def test_short_text_keeps_geometry(self):
-        diagram = Diagram(nodes=[make_node(text="OK")], connectors=[])
+        diagram = make_diagram(nodes=[make_node(text="OK")])
         result = normalize_layout(diagram)
         self.assertEqual(result.nodes[0].width, 160.0)
         self.assertEqual(result.nodes[0].height, 80.0)
 
     def test_overflowing_text_grows_height(self):
         # Even at Miro's minimum font size this cannot fit a 30px-tall shape.
-        diagram = Diagram(
+        diagram = make_diagram(
             nodes=[make_node(text="word " * 60, width=120.0, height=30.0)],
-            connectors=[],
         )
         result = normalize_layout(diagram)
         self.assertGreater(result.nodes[0].height, 30.0)
 
+    def test_growth_is_capped_to_avoid_overlapping_neighbours(self):
+        diagram = make_diagram(
+            nodes=[make_node(text="word " * 60, width=120.0, height=30.0)],
+        )
+        result = normalize_layout(diagram)
+        self.assertLessEqual(result.nodes[0].height, 60.0)
+
+    def test_empty_icon_squares_never_grow(self):
+        # Icon/logo placeholders carry no text; their caption is a label.
+        icon = make_node("icon", text="", width=48.0, height=48.0)
+        result = normalize_layout(make_diagram(nodes=[icon]))
+        self.assertEqual(result.nodes[0].width, 48.0)
+        self.assertEqual(result.nodes[0].height, 48.0)
+
     def test_original_diagram_not_mutated(self):
         node = make_node(text="word " * 60, width=120.0, height=30.0)
-        normalize_layout(Diagram(nodes=[node], connectors=[]))
+        normalize_layout(make_diagram(nodes=[node]))
         self.assertEqual(node.height, 30.0)
 
 
@@ -47,7 +59,7 @@ class NestingTests(unittest.TestCase):
         )
         # Center inside the container but right edge sticking out
         child = make_node("leaf", text="A", x=680.0, y=300.0, width=100.0, height=60.0)
-        result = normalize_layout(Diagram(nodes=[container, child], connectors=[]))
+        result = normalize_layout(make_diagram(nodes=[container, child]))
 
         boxes = {n.id: n for n in result.nodes}
         cl, ct, cr, cb = bounds(boxes["leaf"])
@@ -64,7 +76,7 @@ class NestingTests(unittest.TestCase):
         )
         # Child overlapping the title strip at the very top of the container
         child = make_node("leaf", text="A", x=400.0, y=105.0, width=100.0, height=60.0)
-        result = normalize_layout(Diagram(nodes=[container, child], connectors=[]))
+        result = normalize_layout(make_diagram(nodes=[container, child]))
 
         boxes = {n.id: n for n in result.nodes}
         child_top = boxes["leaf"].y - boxes["leaf"].height / 2
@@ -75,16 +87,16 @@ class NestingTests(unittest.TestCase):
     def test_separate_shapes_untouched(self):
         a = make_node("a", x=100.0, y=100.0)
         b = make_node("b", x=500.0, y=100.0)
-        result = normalize_layout(Diagram(nodes=[a, b], connectors=[]))
+        result = normalize_layout(make_diagram(nodes=[a, b]))
         boxes = {n.id: n for n in result.nodes}
         self.assertEqual((boxes["a"].x, boxes["a"].y), (100.0, 100.0))
         self.assertEqual((boxes["b"].x, boxes["b"].y), (500.0, 100.0))
 
     def test_similar_size_overlap_is_not_treated_as_nesting(self):
-        # Two same-size shapes overlapping — neither is a container.
+        # Two same-size shapes overlapping; neither is a container.
         a = make_node("a", x=100.0, y=100.0)
         b = make_node("b", x=140.0, y=100.0)
-        result = normalize_layout(Diagram(nodes=[a, b], connectors=[]))
+        result = normalize_layout(make_diagram(nodes=[a, b]))
         boxes = {n.id: n for n in result.nodes}
         self.assertEqual(boxes["a"].x, 100.0)
         self.assertEqual(boxes["b"].x, 140.0)

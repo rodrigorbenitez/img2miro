@@ -20,6 +20,7 @@ from .schema import Diagram, Node
 NEST_PADDING = 8.0
 MIN_AREA_RATIO = 1.2  # a parent must be at least this much larger than the child
 OVERLAP_RATIO = 0.5  # of the child's area overlapping, to count as nested
+MAX_GROWTH = 2.0  # text-fit may at most double a shape's height
 
 
 def _area(node: Node) -> float:
@@ -42,7 +43,9 @@ def _expand_for_text(node: Node) -> None:
         + 2 * TEXT_PADDING
     )
     if needed > node.height:
-        node.height = needed
+        # Capped so a mis-extracted long text can't balloon a small shape
+        # over its neighbours.
+        node.height = min(needed, node.height * MAX_GROWTH)
 
 
 def _enclosing_parent(node: Node, nodes: list[Node]) -> Node | None:
@@ -89,4 +92,8 @@ def normalize_layout(diagram: Diagram) -> Diagram:
         if parent is not None:
             _clamp_into(node, parent)
 
-    return Diagram(nodes=nodes, connectors=list(diagram.connectors))
+    return Diagram(
+        nodes=nodes,
+        labels=list(diagram.labels),
+        connectors=list(diagram.connectors),
+    )
