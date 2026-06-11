@@ -33,6 +33,14 @@ def _overlap(a: Node, b: Node) -> float:
     return max(w, 0.0) * max(h, 0.0)
 
 
+def _square_circle(node: Node, side: float | None = None) -> None:
+    """Miro renders a 'circle' shape with unequal width/height as an oval."""
+    if node.shape == "circle":
+        side = side if side is not None else max(node.width, node.height)
+        node.width = side
+        node.height = side
+
+
 def _expand_for_text(node: Node) -> None:
     if not node.text:
         return
@@ -46,6 +54,7 @@ def _expand_for_text(node: Node) -> None:
         # Capped so a mis-extracted long text can't balloon a small shape
         # over its neighbours.
         node.height = min(needed, node.height * MAX_GROWTH)
+        _square_circle(node, node.height)
 
 
 def _enclosing_parent(node: Node, nodes: list[Node]) -> Node | None:
@@ -84,6 +93,7 @@ def normalize_layout(diagram: Diagram) -> Diagram:
     nodes = [node.model_copy() for node in diagram.nodes]
 
     for node in nodes:
+        _square_circle(node)
         _expand_for_text(node)
 
     # Largest first, so a container settles before its children clamp into it.
@@ -91,6 +101,12 @@ def normalize_layout(diagram: Diagram) -> Diagram:
         parent = _enclosing_parent(node, nodes)
         if parent is not None:
             _clamp_into(node, parent)
+
+    # The nesting clamp can shrink one dimension independently; re-square to
+    # the smaller side so circles stay circles and stay inside their parent.
+    for node in nodes:
+        if node.shape == "circle" and node.width != node.height:
+            _square_circle(node, min(node.width, node.height))
 
     return Diagram(
         nodes=nodes,

@@ -8,7 +8,7 @@ from pathlib import Path
 import anthropic
 from dotenv import load_dotenv
 
-from .extractor import extract
+from .extractor import DEFAULT_MODEL, SUPPORTED_MODELS, extract
 from .layout import normalize_layout
 from .miro_client import MiroClient, push_diagram
 
@@ -24,6 +24,16 @@ def main(argv: list[str] | None = None) -> None:
     )
     parser.add_argument("image", type=Path, help="Path to the diagram image")
     parser.add_argument("--board", default=DEFAULT_BOARD, help="Miro board id")
+    parser.add_argument(
+        "--model",
+        choices=SUPPORTED_MODELS,
+        default=DEFAULT_MODEL,
+        help=(
+            "Claude model used for vision extraction "
+            f"(default: {DEFAULT_MODEL}; fable is most capable, "
+            "opus is ~2.5x cheaper, sonnet is cheapest/fastest)"
+        ),
+    )
     parser.add_argument(
         "--refine",
         action=argparse.BooleanOptionalAction,
@@ -47,7 +57,7 @@ def main(argv: list[str] | None = None) -> None:
         )
 
     client = anthropic.Anthropic()
-    diagram = extract(client, args.image, refine=args.refine)
+    diagram = extract(client, args.image, refine=args.refine, model=args.model)
     diagram = normalize_layout(diagram)
     print(
         f"Extracted {len(diagram.nodes)} node(s), "

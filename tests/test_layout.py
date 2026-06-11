@@ -51,6 +51,38 @@ class ExpandForTextTests(unittest.TestCase):
         self.assertEqual(node.height, 30.0)
 
 
+class CircleTests(unittest.TestCase):
+    def test_unequal_circle_becomes_square_geometry(self):
+        # Extracted as 98x110 — Miro would render an oval.
+        circle = make_node(shape="circle", text="", width=98.0, height=110.0)
+        result = normalize_layout(make_diagram(nodes=[circle]))
+        self.assertEqual(result.nodes[0].width, result.nodes[0].height)
+        self.assertEqual(result.nodes[0].width, 110.0)
+
+    def test_circle_stays_square_after_text_expansion(self):
+        circle = make_node(
+            shape="circle", text="word " * 40, width=80.0, height=80.0
+        )
+        result = normalize_layout(make_diagram(nodes=[circle]))
+        node = result.nodes[0]
+        self.assertEqual(node.width, node.height)
+        self.assertGreater(node.height, 80.0)
+
+    def test_circle_stays_square_after_nesting_clamp(self):
+        container = make_node(
+            "box", text="Group", x=400.0, y=300.0, width=600.0, height=400.0,
+            text_valign="top",
+        )
+        # Circle mostly inside but sticking out of the right edge
+        circle = make_node(
+            "ball", shape="circle", text="", x=690.0, y=300.0,
+            width=100.0, height=100.0,
+        )
+        result = normalize_layout(make_diagram(nodes=[container, circle]))
+        ball = {n.id: n for n in result.nodes}["ball"]
+        self.assertEqual(ball.width, ball.height)
+
+
 class NestingTests(unittest.TestCase):
     def test_mostly_inside_child_is_clamped_fully_inside(self):
         container = make_node(

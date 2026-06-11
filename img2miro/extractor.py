@@ -13,7 +13,10 @@ import anthropic
 
 from .schema import Diagram
 
-MODEL = "claude-fable-5"
+# Models that support this call shape (adaptive thinking + structured
+# outputs + vision). Haiku is excluded: it doesn't support adaptive thinking.
+SUPPORTED_MODELS = ["claude-fable-5", "claude-opus-4-8", "claude-sonnet-4-6"]
+DEFAULT_MODEL = "claude-fable-5"
 
 MEDIA_TYPES = {
     ".png": "image/png",
@@ -128,9 +131,9 @@ def _image_block(image_path: Path) -> dict:
     }
 
 
-def _call(client: anthropic.Anthropic, content: list[dict]) -> Diagram:
+def _call(client: anthropic.Anthropic, content: list[dict], model: str) -> Diagram:
     with client.messages.stream(
-        model=MODEL,
+        model=model,
         max_tokens=64000,
         thinking={"type": "adaptive"},
         output_config={
@@ -154,15 +157,20 @@ def _call(client: anthropic.Anthropic, content: list[dict]) -> Diagram:
     return Diagram.model_validate_json(text)
 
 
-def extract(client: anthropic.Anthropic, image_path: Path, refine: bool = True) -> Diagram:
+def extract(
+    client: anthropic.Anthropic,
+    image_path: Path,
+    refine: bool = True,
+    model: str = DEFAULT_MODEL,
+) -> Diagram:
     image = _image_block(image_path)
 
-    print("Extracting diagram", end="", flush=True, file=sys.stderr)
-    diagram = _call(client, [image, {"type": "text", "text": EXTRACT_PROMPT}])
+    print(f"Extracting diagram ({model})", end="", flush=True, file=sys.stderr)
+    diagram = _call(client, [image, {"type": "text", "text": EXTRACT_PROMPT}], model)
 
     if refine:
         print("Refining extraction", end="", flush=True, file=sys.stderr)
         prompt = REFINE_PROMPT.format(json=diagram.model_dump_json(indent=2))
-        diagram = _call(client, [image, {"type": "text", "text": prompt}])
+        diagram = _call(client, [image, {"type": "text", "text": prompt}], model)
 
     return diagram
