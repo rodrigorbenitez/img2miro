@@ -26,6 +26,24 @@ MEDIA_TYPES = {
     ".webp": "image/webp",
 }
 
+# SVGs are sent as source text, not pixels — the markup carries exact
+# coordinates, colors, fonts, and text, so nothing has to be estimated.
+MAX_SVG_BYTES = 800_000
+
+SVG_PREAMBLE = """\
+The diagram is provided as SVG source code below (not as a rendered image). \
+Read positions, sizes, colors, fonts, and text EXACTLY from the markup — do \
+not estimate anything that is stated literally. Treat SVG user units as \
+pixels. Account for transform/translate attributes when computing absolute \
+positions. Everything else in the instructions that says 'image' applies to \
+the rendered result of this SVG.
+
+```svg
+{svg}
+```
+
+"""
+
 EXTRACT_PROMPT = """\
 Extract every element of this diagram so it can be rebuilt as a near-perfect \
 copy on a whiteboard. The rebuilt diagram must look like a mirror of the \
@@ -117,12 +135,23 @@ Current extraction:
 """
 
 
-def _image_block(image_path: Path) -> dict:
-    media_type = MEDIA_TYPES.get(image_path.suffix.lower())
+def _source_block(image_path: Path) -> dict:
+    suffix = image_path.suffix.lower()
+    if suffix == ".svg":
+        svg = image_path.read_text(encoding="utf-8")
+        if len(svg.encode("utf-8")) > MAX_SVG_BYTES:
+            raise ValueError(
+                f"SVG file is too large ({image_path.stat().st_size} bytes; "
+                f"limit {MAX_SVG_BYTES}). Likely it embeds raster images — "
+                "export the diagram as PNG instead."
+            )
+        return {"type": "text", "text": SVG_PREAMBLE.format(svg=svg)}
+
+    media_type = MEDIA_TYPES.get(suffix)
     if media_type is None:
+        supported = ", ".join(sorted([*MEDIA_TYPES, ".svg"]))
         raise ValueError(
-            f"Unsupported image type '{image_path.suffix}'. "
-            f"Supported: {', '.join(sorted(MEDIA_TYPES))}"
+            f"Unsupported image type '{image_path.suffix}'. Supported: {supported}"
         )
     data = base64.standard_b64encode(image_path.read_bytes()).decode("utf-8")
     return {
@@ -163,7 +192,7 @@ def extract(
     refine: bool = True,
     model: str = DEFAULT_MODEL,
 ) -> Diagram:
-    image = _image_block(image_path)
+    image = _source_block(image_path)
 
     print(f"Extracting diagram ({model})", end="", flush=True, file=sys.stderr)
     diagram = _call(client, [image, {"type": "text", "text": EXTRACT_PROMPT}], model)

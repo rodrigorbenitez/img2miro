@@ -30,7 +30,8 @@ Key design decisions (all from user feedback — keep them):
 
 The mapping layer in `miro_client.py` (`shape_payload`, `text_payload`, `connector_payload`, `push_diagram`) is network-free: `push_diagram` accepts any object with `create_shape`/`create_text`/`create_connector`, so tests use a fake client.
 
-- Vision model: `claude-fable-5` (user explicitly requested the most capable model), streaming + adaptive thinking + structured outputs. Handle `stop_reason == "refusal"` before reading content. Cost is ~2.5× Opus per run — the user accepted this.
+- Vision model: `claude-fable-5` by default (user explicitly requested the most capable model; `--model` offers opus-4-8/sonnet-4-6 — Haiku excluded, no adaptive thinking), streaming + adaptive thinking + structured outputs. Handle `stop_reason == "refusal"` before reading content. Cost is ~2.5× Opus per run — the user accepted this.
+- **Input formats**: PNG/JPEG/GIF/WebP go to the API as vision images. **SVG goes as source text** (the markup carries exact coordinates/colors/text — higher fidelity than rasterizing, no extra deps). Capped at 800KB (bigger usually means embedded rasters → tell the user to export PNG).
 - Dependencies are limited to: `anthropic`, `requests`, `pydantic`, `python-dotenv`. Do not add others. Tests use stdlib `unittest`.
 - Credentials: `ANTHROPIC_API_KEY` and `MIRO_ACCESS_TOKEN` from env or `.env` (gitignored; exists on both machines).
 
