@@ -7,11 +7,14 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
+from claude_agent_sdk import ResultMessage
+
 from img2miro.extractor import (
     EXTRACT_PROMPT,
     MAX_SVG_BYTES,
     _agent_output,
     _parse_diagram,
+    _result_failure_message,
     _source_part,
     _stderr_suffix,
     extract,
@@ -155,25 +158,78 @@ class StderrSuffixTests(unittest.TestCase):
         self.assertIn("model not found", suffix)
 
 
+def _result_message(**overrides) -> ResultMessage:
+    fields = dict(
+        subtype="success",
+        duration_ms=1,
+        duration_api_ms=1,
+        is_error=False,
+        num_turns=1,
+        session_id="s1",
+    )
+    fields.update(overrides)
+    return ResultMessage(**fields)
+
+
+def _fake_query(*messages, then_raise=None):
+    """Build a stand-in for extractor.query: an async generator that yields the
+    given messages, then optionally raises (mimicking the SDK's stream error
+    after a non-zero CLI exit)."""
+
+    def factory(*args, **kwargs):
+        async def gen():
+            for m in messages:
+                yield m
+            if then_raise is not None:
+                raise then_raise
+
+        return gen()
+
+    return factory
+
+
+class ResultFailureMessageTests(unittest.TestCase):
+    def test_surfaces_subtype_stop_reason_and_model_text(self):
+        rm = _result_message(
+            is_error=True,
+            subtype="success",
+            stop_reason="refusal",
+            result="I can't read that image.",
+        )
+        msg = _result_failure_message(rm, [])
+        self.assertIn("subtype=success", msg)
+        self.assertIn("stop_reason=refusal", msg)
+        self.assertIn("I can't read that image.", msg)
+
+    def test_surfaces_denied_tools(self):
+        rm = _result_message(is_error=True, permission_denials=["Read"])
+        self.assertIn("denied_tools", _result_failure_message(rm, []))
+
+    def test_appends_captured_stderr(self):
+        rm = _result_message(is_error=True)
+        msg = _result_failure_message(rm, ["model not found"])
+        self.assertIn("Claude Code CLI said:", msg)
+        self.assertIn("model not found", msg)
+
+
 class AgentOutputErrorTests(unittest.TestCase):
-    """`asyncio.run` is faked; close the `_run()` coroutine it receives so the
-    test doesn't leak an un-awaited coroutine."""
-
-    @staticmethod
-    def _fake_run(*, raises=None, returns=None):
-        def run(coro):
-            coro.close()
-            if raises is not None:
-                raise raises
-            return returns
-
-        return run
-
-    def test_bare_sdk_exception_is_wrapped_not_raw(self):
-        # The SDK raises a plain Exception from its message stream when the CLI
-        # exits non-zero; we must surface it as a clean RuntimeError.
+    def test_error_result_yielded_before_stream_raises_is_reported(self):
+        # The SDK yields the error result, then raises from the stream; we must
+        # report the result's real fields, not the opaque wrapper.
+        rm = _result_message(
+            is_error=True, subtype="success", result="schema validation failed"
+        )
         boom = Exception("Claude Code returned an error result: success")
-        with patch("img2miro.extractor.asyncio.run", self._fake_run(raises=boom)):
+        with patch("img2miro.extractor.query", _fake_query(rm, then_raise=boom)):
+            with self.assertRaises(RuntimeError) as ctx:
+                _agent_output("prompt", "claude-fable-5", Path("."))
+        msg = str(ctx.exception)
+        self.assertIn("Extraction failed", msg)
+        self.assertIn("schema validation failed", msg)
+
+    def test_bare_sdk_exception_with_no_result_is_wrapped(self):
+        boom = Exception("Claude Code returned an error result: success")
+        with patch("img2miro.extractor.query", _fake_query(then_raise=boom)):
             with self.assertRaises(RuntimeError) as ctx:
                 _agent_output("prompt", "claude-fable-5", Path("."))
         msg = str(ctx.exception)
@@ -181,7 +237,7 @@ class AgentOutputErrorTests(unittest.TestCase):
         self.assertIn("error result", msg)
 
     def test_missing_result_raises_clear_error(self):
-        with patch("img2miro.extractor.asyncio.run", self._fake_run(returns=None)):
+        with patch("img2miro.extractor.query", _fake_query()):
             with self.assertRaises(RuntimeError) as ctx:
                 _agent_output("prompt", "claude-fable-5", Path("."))
         self.assertIn("without producing a result", str(ctx.exception))

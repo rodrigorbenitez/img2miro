@@ -235,6 +235,23 @@ def _stderr_suffix(lines: list[str]) -> str:
     return f"\n\nClaude Code CLI said:\n{text}" if text else ""
 
 
+def _result_failure_message(result: ResultMessage, stderr_lines: list[str]) -> str:
+    """Build an actionable message from a failed result. The subtype alone is
+    often unhelpful (e.g. 'success' with is_error set), so surface every field
+    the CLI gives us — the model's own text, why it stopped, denied tools, and
+    the CLI's stderr — to pin down the real cause."""
+    parts = [f"subtype={result.subtype}"]
+    if result.stop_reason:
+        parts.append(f"stop_reason={result.stop_reason}")
+    if result.permission_denials:
+        parts.append(f"denied_tools={result.permission_denials}")
+    detail = "; ".join(result.errors or []) or (result.result or "").strip()
+    header = f"Extraction failed ({', '.join(parts)})"
+    if detail:
+        header += f"\nClaude said: {detail}"
+    return header + _stderr_suffix(stderr_lines)
+
+
 def _agent_output(prompt: str, model: str, cwd: Path) -> str | dict:
     """Run one non-interactive agent turn; return the structured output
     (dict) if the CLI produced one, otherwise the final response text."""
@@ -259,10 +276,19 @@ def _agent_output(prompt: str, model: str, cwd: Path) -> str | dict:
 
     async def _run() -> ResultMessage | None:
         result = None
-        async for message in query(prompt=prompt, options=options):
-            print(".", end="", flush=True, file=sys.stderr)
-            if isinstance(message, ResultMessage):
-                result = message
+        try:
+            async for message in query(prompt=prompt, options=options):
+                print(".", end="", flush=True, file=sys.stderr)
+                if isinstance(message, ResultMessage):
+                    result = message
+        except Exception:
+            # When the CLI exits non-zero the SDK raises a bare Exception from
+            # its stream — but it has usually already yielded the error result
+            # that explains why. Keep that result so the caller can report its
+            # real fields instead of the SDK's opaque wrapper text.
+            if result is not None and result.is_error:
+                return result
+            raise
         return result
 
     try:
@@ -289,12 +315,7 @@ def _agent_output(prompt: str, model: str, cwd: Path) -> str | dict:
     if result is None:
         raise RuntimeError("The agent finished without producing a result.")
     if result.is_error:
-        details = "; ".join(result.errors or []) or result.result or ""
-        raise RuntimeError(
-            f"Extraction failed ({result.subtype})"
-            + (f": {details}" if details else ".")
-            + _stderr_suffix(stderr_lines)
-        )
+        raise RuntimeError(_result_failure_message(result, stderr_lines))
     if result.structured_output is not None:
         return result.structured_output
     if not result.result:
