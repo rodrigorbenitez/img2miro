@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Current state
 
-Working end-to-end as of 2026-06-11; migrated from the Anthropic API to the Claude Agent SDK on 2026-06-12 (branch `feature/agent-sdk-migration`). On the dev laptop, Python 3.12 lives at `%LOCALAPPDATA%\Programs\Python\Python312\python.exe` and is **not on PATH in pre-existing shells**. The user runs conversions on a *different* PC that clones this repo and has its own `.env` — code changes only reach them after `git push`, and **that PC needs Claude Code installed and logged in** (`claude /login`) after pulling the Agent SDK migration.
+Working end-to-end as of 2026-06-11; migrated from the Anthropic API to the Claude Agent SDK on 2026-06-12 (branch `feature/agent-sdk-migration`). On the dev laptop, Python 3.12 lives at `%LOCALAPPDATA%\Programs\Python\Python312\python.exe` and is **not on PATH in pre-existing shells**. The user runs conversions on a *different* PC that clones this repo and has its own `.env` — code changes only reach them after `git push`, and **that PC needs Claude Code installed** after pulling the Agent SDK migration (the first conversion opens the browser sign-in for the Claude account automatically).
 
 ## What this project is
 
@@ -35,7 +35,7 @@ The mapping layer in `miro_client.py` (`shape_payload`, `text_payload`, `connect
 - Vision model: `claude-fable-5` by default (user explicitly requested the most capable model; `--model` offers opus-4-8/sonnet-4-6 — Haiku excluded). There is no direct API client and no `stop_reason` to read — failures (including refusals) surface via `ResultMessage.is_error`/`errors` and are raised as `RuntimeError`. Usage bills the user's Claude subscription.
 - **Input formats**: PNG/JPEG/GIF/WebP are viewed by the agent's Read tool. **SVG goes as source text** (the markup carries exact coordinates/colors/text — higher fidelity than rasterizing, no extra deps). Capped at 800KB (bigger usually means embedded rasters → tell the user to export PNG).
 - Dependencies are limited to: `claude-agent-sdk`, `requests`, `pydantic`, `python-dotenv`. Do not add others. Tests use stdlib `unittest`.
-- Credentials: `MIRO_ACCESS_TOKEN` from env or `.env` (gitignored; exists on both machines). Claude auth comes from Claude Code's login (`claude /login`, or `CLAUDE_CODE_OAUTH_TOKEN` on headless machines) — `cli.py` checks this at startup via `claude auth status --json` and fails fast with setup instructions. `ANTHROPIC_API_KEY` is deliberately warned about and **deleted from the environment** at startup so the Claude Code subprocess can never silently bill it — do not remove that guard.
+- Credentials: `MIRO_ACCESS_TOKEN` from env or `.env` (gitignored; exists on both machines). Claude auth comes from the user's Claude account (browser sign-in, or `CLAUDE_CODE_OAUTH_TOKEN` on headless machines) — `cli.py` checks `claude auth status --json` at startup; if not signed in and the terminal is interactive, it launches the browser sign-in itself (`claude auth login --claudeai`) and continues after the user logs in, otherwise it fails fast with setup instructions. The user's explicit UX requirement: the user signs in with their Claude account in the browser — they should never need to know Claude Code CLI commands. `ANTHROPIC_API_KEY` is deliberately warned about and **deleted from the environment** at startup so the Claude Code subprocess can never silently bill it — do not remove that guard.
 
 ## Critical Miro API quirks
 

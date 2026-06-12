@@ -17,25 +17,17 @@ from .miro_client import MiroClient, push_diagram
 DEFAULT_BOARD = "uXjVHGiQvmg="
 
 CLAUDE_SETUP_HELP = """\
-img2miro runs conversions through Claude Code, billed to your Claude
-subscription. To set it up:
+img2miro runs conversions through your Claude account (Pro or Max plan -
+the free plan won't work). To set it up:
   1. Install Claude Code:  npm install -g @anthropic-ai/claude-code
      (or use the native installer from https://claude.com/claude-code)
-  2. Log in:               claude /login
-Note: a Claude Pro or Max subscription is required - the free plan won't work.
+  2. Sign in with your Claude account:  claude auth login
+     (opens a browser page where you log in at claude.ai)
 On headless machines, set CLAUDE_CODE_OAUTH_TOKEN instead (create one with
 `claude setup-token`)."""
 
 
-def _check_claude_code() -> None:
-    """Fail fast if the Claude Code CLI is missing or not authenticated."""
-    claude = shutil.which("claude")
-    if claude is None:
-        sys.exit("Claude Code CLI not found on PATH.\n" + CLAUDE_SETUP_HELP)
-
-    if os.environ.get("CLAUDE_CODE_OAUTH_TOKEN"):
-        return
-
+def _logged_in(claude: str) -> bool:
     try:
         proc = subprocess.run(
             [claude, "auth", "status", "--json"],
@@ -43,11 +35,40 @@ def _check_claude_code() -> None:
             text=True,
             timeout=30,
         )
-        status = json.loads(proc.stdout)
+        return bool(json.loads(proc.stdout).get("loggedIn"))
     except (OSError, subprocess.TimeoutExpired, json.JSONDecodeError):
-        status = {}
-    if not status.get("loggedIn"):
-        sys.exit("Claude Code is installed but not logged in.\n" + CLAUDE_SETUP_HELP)
+        return False
+
+
+def _check_claude_code() -> None:
+    """Ensure the Claude Code CLI is present and signed in to a Claude account.
+
+    When not signed in and running in an interactive terminal, launch the
+    browser sign-in (the user logs in with their Claude account) and continue
+    once it completes. Otherwise fail fast with setup instructions.
+    """
+    claude = shutil.which("claude")
+    if claude is None:
+        sys.exit("Claude Code CLI not found on PATH.\n" + CLAUDE_SETUP_HELP)
+
+    if os.environ.get("CLAUDE_CODE_OAUTH_TOKEN"):
+        return
+
+    if _logged_in(claude):
+        return
+
+    if sys.stdin.isatty():
+        print(
+            "You're not signed in to Claude yet. Opening the browser sign-in - "
+            "log in there with your Claude account (Pro or Max plan), then the "
+            "conversion will continue.",
+            file=sys.stderr,
+        )
+        subprocess.run([claude, "auth", "login", "--claudeai"])
+        if _logged_in(claude):
+            return
+
+    sys.exit("Claude sign-in required.\n" + CLAUDE_SETUP_HELP)
 
 
 def main(argv: list[str] | None = None) -> None:

@@ -26,13 +26,13 @@ pip install -e .
 
 The tool needs two things: a **Claude Code login** (for the vision extraction, billed to your Claude subscription) and a **Miro access token** (to create items on your board).
 
-**1. Claude Code (vision extraction)**
+**1. Claude account (vision extraction)**
 
 1. Install Claude Code: `npm install -g @anthropic-ai/claude-code` (or use the [native installer](https://claude.com/claude-code)).
-2. Log in: run `claude /login` and sign in with your Claude account.
+2. Run your first conversion — a browser page opens where you **sign in with your Claude account**, and the conversion continues from there. (You can also sign in ahead of time with `claude auth login`.)
 3. You need a **Claude Pro or Max subscription** — the free plan won't work.
 
-That's it — no API key. Conversions draw from your subscription's usage allowance (see [Costs](#costs)). The tool checks at startup that Claude Code is installed and logged in, and tells you what to do if it isn't.
+That's it — no API key. Conversions draw from your subscription's usage allowance (see [Costs](#costs)). The sign-in happens once per machine; after that, conversions run without any prompt.
 
 **Headless machines (CI, servers):** instead of an interactive login, create a long-lived token with `claude setup-token` on a machine where you're logged in, then set it as the `CLAUDE_CODE_OAUTH_TOKEN` environment variable on the headless machine.
 

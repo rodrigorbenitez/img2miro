@@ -250,8 +250,9 @@ def _agent_output(prompt: str, model: str, cwd: Path) -> str | dict:
     except CLINotFoundError as exc:
         raise RuntimeError(
             "Claude Code CLI not found. Install it with "
-            "`npm install -g @anthropic-ai/claude-code`, then log in with "
-            "`claude /login` (requires a Claude Pro/Max subscription)."
+            "`npm install -g @anthropic-ai/claude-code`, then sign in with "
+            "your Claude account via `claude auth login` (requires a Claude "
+            "Pro/Max subscription)."
         ) from exc
     except ClaudeSDKError as exc:
         raise RuntimeError(f"Claude Code agent failed: {exc}") from exc
