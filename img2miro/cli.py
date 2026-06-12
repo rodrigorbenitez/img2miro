@@ -1,11 +1,13 @@
 """Command-line entry point: python -m img2miro <image> --board <id>"""
 
 import argparse
+import json
 import os
+import shutil
+import subprocess
 import sys
 from pathlib import Path
 
-import anthropic
 from dotenv import load_dotenv
 
 from .extractor import DEFAULT_MODEL, SUPPORTED_MODELS, extract
@@ -14,9 +16,52 @@ from .miro_client import MiroClient, push_diagram
 
 DEFAULT_BOARD = "uXjVHGiQvmg="
 
+CLAUDE_SETUP_HELP = """\
+img2miro runs conversions through Claude Code, billed to your Claude
+subscription. To set it up:
+  1. Install Claude Code:  npm install -g @anthropic-ai/claude-code
+     (or use the native installer from https://claude.com/claude-code)
+  2. Log in:               claude /login
+Note: a Claude Pro or Max subscription is required - the free plan won't work.
+On headless machines, set CLAUDE_CODE_OAUTH_TOKEN instead (create one with
+`claude setup-token`)."""
+
+
+def _check_claude_code() -> None:
+    """Fail fast if the Claude Code CLI is missing or not authenticated."""
+    claude = shutil.which("claude")
+    if claude is None:
+        sys.exit("Claude Code CLI not found on PATH.\n" + CLAUDE_SETUP_HELP)
+
+    if os.environ.get("CLAUDE_CODE_OAUTH_TOKEN"):
+        return
+
+    try:
+        proc = subprocess.run(
+            [claude, "auth", "status", "--json"],
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+        status = json.loads(proc.stdout)
+    except (OSError, subprocess.TimeoutExpired, json.JSONDecodeError):
+        status = {}
+    if not status.get("loggedIn"):
+        sys.exit("Claude Code is installed but not logged in.\n" + CLAUDE_SETUP_HELP)
+
 
 def main(argv: list[str] | None = None) -> None:
     load_dotenv()
+
+    if "ANTHROPIC_API_KEY" in os.environ:
+        print(
+            "Warning: ANTHROPIC_API_KEY is set but is now ignored - conversions "
+            "run through Claude Code and bill your Claude subscription, not the "
+            "API key.",
+            file=sys.stderr,
+        )
+        # Make sure the Claude Code subprocess can't inherit it either.
+        del os.environ["ANTHROPIC_API_KEY"]
 
     parser = argparse.ArgumentParser(
         prog="img2miro",
@@ -31,7 +76,7 @@ def main(argv: list[str] | None = None) -> None:
         help=(
             "Claude model used for vision extraction "
             f"(default: {DEFAULT_MODEL}; fable is most capable, "
-            "opus is ~2.5x cheaper, sonnet is cheapest/fastest)"
+            "opus is cheaper on usage limits, sonnet is lightest/fastest)"
         ),
     )
     parser.add_argument(
@@ -45,19 +90,15 @@ def main(argv: list[str] | None = None) -> None:
     if not args.image.is_file():
         sys.exit(f"Image not found: {args.image}")
 
-    missing = [
-        name
-        for name in ("ANTHROPIC_API_KEY", "MIRO_ACCESS_TOKEN")
-        if not os.environ.get(name)
-    ]
-    if missing:
+    _check_claude_code()
+
+    if not os.environ.get("MIRO_ACCESS_TOKEN"):
         sys.exit(
-            f"Missing environment variable(s): {', '.join(missing)}. "
-            "Set them in the environment or in a .env file."
+            "Missing environment variable: MIRO_ACCESS_TOKEN. "
+            "Set it in the environment or in a .env file."
         )
 
-    client = anthropic.Anthropic()
-    diagram = extract(client, args.image, refine=args.refine, model=args.model)
+    diagram = extract(args.image, refine=args.refine, model=args.model)
     diagram = normalize_layout(diagram)
     print(
         f"Extracted {len(diagram.nodes)} node(s), "

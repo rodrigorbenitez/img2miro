@@ -1,8 +1,10 @@
 """Pydantic v2 models describing an extracted diagram.
 
 `extra="forbid"` makes pydantic emit `additionalProperties: false` in the
-JSON schema, which the Anthropic structured-outputs API requires on every
-object. All fields are required so the model must emit complete items.
+JSON schema, which structured-output enforcement (the Claude Code CLI's
+--json-schema) requires on every object — and it also rejects hallucinated
+fields when we validate locally. All fields are required so the model must
+emit complete items.
 """
 
 from typing import Literal

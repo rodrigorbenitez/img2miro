@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Current state
 
-Working end-to-end as of 2026-06-11; iterating on extraction fidelity from user feedback. On the dev laptop, Python 3.12 lives at `%LOCALAPPDATA%\Programs\Python\Python312\python.exe` and is **not on PATH in pre-existing shells**. The user runs conversions on a *different* PC that clones this repo and has its own `.env` — code changes only reach them after `git push`.
+Working end-to-end as of 2026-06-11; migrated from the Anthropic API to the Claude Agent SDK on 2026-06-12 (branch `feature/agent-sdk-migration`). On the dev laptop, Python 3.12 lives at `%LOCALAPPDATA%\Programs\Python\Python312\python.exe` and is **not on PATH in pre-existing shells**. The user runs conversions on a *different* PC that clones this repo and has its own `.env` — code changes only reach them after `git push`, and **that PC needs Claude Code installed and logged in** (`claude /login`) after pulling the Agent SDK migration.
 
 ## What this project is
 
@@ -19,7 +19,9 @@ python -m img2miro <image> --board <id>
 
 ## Architecture
 
-Pipeline: image → `extractor.py` (vision → strict JSON via structured outputs) → `schema.py` (pydantic v2 models; `extra="forbid"` is load-bearing — it emits `additionalProperties: false`, required by the structured-outputs API) → `layout.py` (geometric normalization) → `miro_client.py` (Miro REST API v2) → board items. `cli.py` orchestrates.
+Pipeline: image → `extractor.py` (Claude Agent SDK → strict JSON, parsed and validated locally) → `schema.py` (pydantic v2 models; `extra="forbid"` is load-bearing — it emits `additionalProperties: false`, required by the CLI's `--json-schema` structured-output enforcement, and rejects hallucinated fields on local validation) → `layout.py` (geometric normalization) → `miro_client.py` (Miro REST API v2) → board items. `cli.py` orchestrates.
+
+The model call (`extractor._agent_output`) runs one non-interactive agent turn through `claude_agent_sdk.query()` against the Claude Code CLI: `tools=["Read"]` is the agent's entire tool set (raster images are viewed via Read; SVG source is embedded in the prompt — no tool needed), `output_format={"type": "json_schema", ...}` constrains the response (lands in `ResultMessage.structured_output`; the text path through `_parse_diagram` strips markdown fences defensively and pydantic-validates either way). `_agent_output` is the seam tests fake — everything above it is network- and CLI-free.
 
 Key design decisions (all from user feedback — keep them):
 
@@ -30,10 +32,10 @@ Key design decisions (all from user feedback — keep them):
 
 The mapping layer in `miro_client.py` (`shape_payload`, `text_payload`, `connector_payload`, `push_diagram`) is network-free: `push_diagram` accepts any object with `create_shape`/`create_text`/`create_connector`, so tests use a fake client.
 
-- Vision model: `claude-fable-5` by default (user explicitly requested the most capable model; `--model` offers opus-4-8/sonnet-4-6 — Haiku excluded, no adaptive thinking), streaming + adaptive thinking + structured outputs. Handle `stop_reason == "refusal"` before reading content. Cost is ~2.5× Opus per run — the user accepted this.
-- **Input formats**: PNG/JPEG/GIF/WebP go to the API as vision images. **SVG goes as source text** (the markup carries exact coordinates/colors/text — higher fidelity than rasterizing, no extra deps). Capped at 800KB (bigger usually means embedded rasters → tell the user to export PNG).
-- Dependencies are limited to: `anthropic`, `requests`, `pydantic`, `python-dotenv`. Do not add others. Tests use stdlib `unittest`.
-- Credentials: `ANTHROPIC_API_KEY` and `MIRO_ACCESS_TOKEN` from env or `.env` (gitignored; exists on both machines).
+- Vision model: `claude-fable-5` by default (user explicitly requested the most capable model; `--model` offers opus-4-8/sonnet-4-6 — Haiku excluded). There is no direct API client and no `stop_reason` to read — failures (including refusals) surface via `ResultMessage.is_error`/`errors` and are raised as `RuntimeError`. Usage bills the user's Claude subscription.
+- **Input formats**: PNG/JPEG/GIF/WebP are viewed by the agent's Read tool. **SVG goes as source text** (the markup carries exact coordinates/colors/text — higher fidelity than rasterizing, no extra deps). Capped at 800KB (bigger usually means embedded rasters → tell the user to export PNG).
+- Dependencies are limited to: `claude-agent-sdk`, `requests`, `pydantic`, `python-dotenv`. Do not add others. Tests use stdlib `unittest`.
+- Credentials: `MIRO_ACCESS_TOKEN` from env or `.env` (gitignored; exists on both machines). Claude auth comes from Claude Code's login (`claude /login`, or `CLAUDE_CODE_OAUTH_TOKEN` on headless machines) — `cli.py` checks this at startup via `claude auth status --json` and fails fast with setup instructions. `ANTHROPIC_API_KEY` is deliberately warned about and **deleted from the environment** at startup so the Claude Code subprocess can never silently bill it — do not remove that guard.
 
 ## Critical Miro API quirks
 

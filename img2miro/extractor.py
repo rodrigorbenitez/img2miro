@@ -1,23 +1,34 @@
-"""Vision extraction: diagram image -> Diagram via the Anthropic API.
+"""Vision extraction: diagram image -> Diagram via the Claude Agent SDK.
 
-Uses claude-opus-4-8 with streaming, adaptive thinking, and structured
-outputs (json_schema) so the response is guaranteed to parse against the
-Diagram schema.
+Runs the extraction through the Claude Code CLI (claude-agent-sdk), so usage
+bills the user's Claude subscription (``claude /login`` or
+CLAUDE_CODE_OAUTH_TOKEN) instead of an Anthropic API key. The agent gets a
+single tool — Read, to view the image — and its output is constrained to JSON
+matching the Diagram schema, which we parse and validate locally with pydantic.
 """
 
-import base64
+import asyncio
+import json
 import sys
 from pathlib import Path
 
-import anthropic
+from claude_agent_sdk import (
+    ClaudeAgentOptions,
+    ClaudeSDKError,
+    CLINotFoundError,
+    ResultMessage,
+    query,
+)
+from pydantic import ValidationError
 
 from .schema import Diagram
 
-# Models that support this call shape (adaptive thinking + structured
-# outputs + vision). Haiku is excluded: it doesn't support adaptive thinking.
+# Models worth using for this task (most capable first). Haiku is excluded:
+# extraction fidelity drops too far below the smaller models.
 SUPPORTED_MODELS = ["claude-fable-5", "claude-opus-4-8", "claude-sonnet-4-6"]
 DEFAULT_MODEL = "claude-fable-5"
 
+# Raster formats the agent can view with the Read tool.
 MEDIA_TYPES = {
     ".png": "image/png",
     ".jpg": "image/jpeg",
@@ -42,6 +53,21 @@ the rendered result of this SVG.
 {svg}
 ```
 
+"""
+
+IMAGE_PREAMBLE = """\
+First use the Read tool to view the diagram image at this exact path:
+{path}
+
+Then follow the instructions below, working from what you see in that image.
+
+"""
+
+JSON_INSTRUCTION = """\
+
+
+Return the extracted diagram as a single JSON object matching the required \
+schema. Output ONLY the JSON — no markdown fences, no commentary.\
 """
 
 EXTRACT_PROMPT = """\
@@ -150,7 +176,7 @@ Current extraction:
 """
 
 
-def _source_block(image_path: Path) -> dict:
+def _source_part(image_path: Path) -> str:
     suffix = image_path.suffix.lower()
     if suffix == ".svg":
         svg = image_path.read_text(encoding="utf-8")
@@ -160,61 +186,117 @@ def _source_block(image_path: Path) -> dict:
                 f"limit {MAX_SVG_BYTES}). Likely it embeds raster images — "
                 "export the diagram as PNG instead."
             )
-        return {"type": "text", "text": SVG_PREAMBLE.format(svg=svg)}
+        return SVG_PREAMBLE.format(svg=svg)
 
-    media_type = MEDIA_TYPES.get(suffix)
-    if media_type is None:
+    if suffix not in MEDIA_TYPES:
         supported = ", ".join(sorted([*MEDIA_TYPES, ".svg"]))
         raise ValueError(
             f"Unsupported image type '{image_path.suffix}'. Supported: {supported}"
         )
-    data = base64.standard_b64encode(image_path.read_bytes()).decode("utf-8")
-    return {
-        "type": "image",
-        "source": {"type": "base64", "media_type": media_type, "data": data},
-    }
+    return IMAGE_PREAMBLE.format(path=image_path.resolve())
 
 
-def _call(client: anthropic.Anthropic, content: list[dict], model: str) -> Diagram:
-    with client.messages.stream(
-        model=model,
-        max_tokens=64000,
-        thinking={"type": "adaptive"},
-        output_config={
-            "format": {
-                "type": "json_schema",
-                "schema": Diagram.model_json_schema(),
-            }
-        },
-        messages=[{"role": "user", "content": content}],
-    ) as stream:
-        for _ in stream.text_stream:
-            print(".", end="", flush=True)
-        message = stream.get_final_message()
-    print(flush=True)
-    if message.stop_reason == "refusal":
+def _validate_diagram(data: object) -> Diagram:
+    try:
+        return Diagram.model_validate(data)
+    except ValidationError as exc:
         raise RuntimeError(
-            "The model declined to process this image (stop_reason=refusal). "
-            "Try a different image."
+            f"The model's JSON does not match the diagram schema:\n{exc}"
+        ) from exc
+
+
+def _parse_diagram(text: str) -> Diagram:
+    cleaned = text.strip()
+    if cleaned.startswith("```"):
+        cleaned = cleaned.split("\n", 1)[1] if "\n" in cleaned else ""
+        if cleaned.rstrip().endswith("```"):
+            cleaned = cleaned.rstrip()[:-3]
+    start, end = cleaned.find("{"), cleaned.rfind("}")
+    if start != -1 and end > start:
+        cleaned = cleaned[start : end + 1]
+    try:
+        data = json.loads(cleaned)
+    except json.JSONDecodeError as exc:
+        snippet = text.strip()[:200]
+        raise RuntimeError(
+            f"The model did not return valid JSON ({exc}). "
+            f"Response began with: {snippet!r}"
+        ) from exc
+    return _validate_diagram(data)
+
+
+def _agent_output(prompt: str, model: str, cwd: Path) -> str | dict:
+    """Run one non-interactive agent turn; return the structured output
+    (dict) if the CLI produced one, otherwise the final response text."""
+    options = ClaudeAgentOptions(
+        model=model,
+        tools=["Read"],  # the agent's entire tool set: just viewing the image
+        allowed_tools=["Read"],  # ...and it runs without permission prompts
+        max_turns=8,
+        cwd=cwd,
+        output_format={"type": "json_schema", "schema": Diagram.model_json_schema()},
+    )
+
+    async def _run() -> ResultMessage | None:
+        result = None
+        async for message in query(prompt=prompt, options=options):
+            print(".", end="", flush=True, file=sys.stderr)
+            if isinstance(message, ResultMessage):
+                result = message
+        return result
+
+    try:
+        result = asyncio.run(_run())
+    except CLINotFoundError as exc:
+        raise RuntimeError(
+            "Claude Code CLI not found. Install it with "
+            "`npm install -g @anthropic-ai/claude-code`, then log in with "
+            "`claude /login` (requires a Claude Pro/Max subscription)."
+        ) from exc
+    except ClaudeSDKError as exc:
+        raise RuntimeError(f"Claude Code agent failed: {exc}") from exc
+    finally:
+        print(flush=True, file=sys.stderr)
+
+    if result is None:
+        raise RuntimeError("The agent finished without producing a result.")
+    if result.is_error:
+        details = "; ".join(result.errors or []) or result.result or ""
+        raise RuntimeError(
+            f"Extraction failed ({result.subtype})"
+            + (f": {details}" if details else ".")
         )
-    text = next(b.text for b in message.content if b.type == "text")
-    return Diagram.model_validate_json(text)
+    if result.structured_output is not None:
+        return result.structured_output
+    if not result.result:
+        raise RuntimeError(
+            "The model returned an empty response. "
+            "Try again or use a different image."
+        )
+    return result.result
+
+
+def _call(prompt: str, model: str, cwd: Path) -> Diagram:
+    output = _agent_output(prompt, model, cwd)
+    if isinstance(output, str):
+        return _parse_diagram(output)
+    return _validate_diagram(output)
 
 
 def extract(
-    client: anthropic.Anthropic,
     image_path: Path,
     refine: bool = True,
     model: str = DEFAULT_MODEL,
 ) -> Diagram:
-    image = _source_block(image_path)
+    source = _source_part(image_path)
+    cwd = image_path.resolve().parent
 
     print(f"Extracting diagram ({model})", end="", flush=True, file=sys.stderr)
-    diagram = _call(client, [image, {"type": "text", "text": EXTRACT_PROMPT}], model)
+    diagram = _call(source + EXTRACT_PROMPT + JSON_INSTRUCTION, model, cwd)
 
     if refine:
         print("Refining extraction", end="", flush=True, file=sys.stderr)
         prompt = REFINE_PROMPT.format(json=diagram.model_dump_json(indent=2))
-        diagram = _call(client, [image, {"type": "text", "text": prompt}], model)
+        diagram = _call(source + prompt + JSON_INSTRUCTION, model, cwd)
 
     return diagram
