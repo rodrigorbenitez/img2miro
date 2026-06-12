@@ -1,8 +1,8 @@
 """Unit tests for the CLI startup gate — no network, no Claude Code CLI.
 
-`_logged_in` and `_check_claude_code` are the only branching logic in cli.py
-worth covering on their own; `shutil.which`, `subprocess.run`, and the tty
-check are faked so nothing real runs and no browser opens.
+`_logged_in`, `_check_claude_code`, and `_choose_model` are the branching
+logic in cli.py worth covering on their own; `shutil.which`, `subprocess.run`,
+`input`, and the tty check are faked so nothing real runs and no browser opens.
 """
 
 import subprocess
@@ -10,7 +10,8 @@ import unittest
 from types import SimpleNamespace
 from unittest.mock import patch
 
-from img2miro.cli import _check_claude_code, _logged_in
+from img2miro.cli import _check_claude_code, _choose_model, _logged_in
+from img2miro.extractor import DEFAULT_MODEL, SUPPORTED_MODELS
 
 
 def _proc(stdout: str) -> SimpleNamespace:
@@ -49,53 +50,68 @@ class CheckClaudeCodeTests(unittest.TestCase):
                 _check_claude_code()
         self.assertIn("not found", str(ctx.exception))
 
-    def test_oauth_token_skips_auth_check(self):
-        # With a token set, auth status must not be checked at all.
+    def test_oauth_token_skips_browser_login(self):
+        # A headless token bypasses the browser sign-in entirely.
         with patch("img2miro.cli.shutil.which", return_value="claude"), patch.dict(
             "os.environ", {"CLAUDE_CODE_OAUTH_TOKEN": "tok"}, clear=False
-        ), patch("img2miro.cli._logged_in") as logged_in:
-            _check_claude_code()
-        logged_in.assert_not_called()
-
-    def test_already_signed_in_passes(self):
-        with patch("img2miro.cli.shutil.which", return_value="claude"), patch.dict(
-            "os.environ", {}, clear=True
-        ), patch("img2miro.cli._logged_in", return_value=True):
-            _check_claude_code()  # no SystemExit, no browser launch
-
-    def test_not_signed_in_noninteractive_exits(self):
-        with patch("img2miro.cli.shutil.which", return_value="claude"), patch.dict(
-            "os.environ", {}, clear=True
-        ), patch("img2miro.cli._logged_in", return_value=False), patch(
-            "img2miro.cli.sys.stdin.isatty", return_value=False
         ), patch("img2miro.cli.subprocess.run") as run:
-            with self.assertRaises(SystemExit) as ctx:
-                _check_claude_code()
-        self.assertIn("sign-in required", str(ctx.exception))
-        run.assert_not_called()  # never tries to open a browser when headless
+            _check_claude_code()
+        run.assert_not_called()
 
-    def test_interactive_launches_browser_login_then_continues(self):
-        # Logged out, then logged in after the browser sign-in completes.
+    def test_forces_browser_login_every_run_then_continues(self):
+        # Even with no token, the browser login is launched unconditionally;
+        # once it reports signed in, the run proceeds.
         with patch("img2miro.cli.shutil.which", return_value="claude"), patch.dict(
             "os.environ", {}, clear=True
-        ), patch(
-            "img2miro.cli._logged_in", side_effect=[False, True]
-        ), patch("img2miro.cli.sys.stdin.isatty", return_value=True), patch(
-            "img2miro.cli.subprocess.run"
-        ) as run:
+        ), patch("img2miro.cli.subprocess.run") as run, patch(
+            "img2miro.cli._logged_in", return_value=True
+        ):
             _check_claude_code()  # no SystemExit
         run.assert_called_once_with(["claude", "auth", "login", "--claudeai"])
 
-    def test_interactive_login_that_fails_still_exits(self):
+    def test_exits_when_login_does_not_authenticate(self):
         with patch("img2miro.cli.shutil.which", return_value="claude"), patch.dict(
             "os.environ", {}, clear=True
-        ), patch("img2miro.cli._logged_in", return_value=False), patch(
-            "img2miro.cli.sys.stdin.isatty", return_value=True
-        ), patch("img2miro.cli.subprocess.run") as run:
+        ), patch("img2miro.cli.subprocess.run") as run, patch(
+            "img2miro.cli._logged_in", return_value=False
+        ):
             with self.assertRaises(SystemExit) as ctx:
                 _check_claude_code()
         self.assertIn("sign-in required", str(ctx.exception))
         run.assert_called_once()  # the browser login was attempted
+
+
+class ChooseModelTests(unittest.TestCase):
+    def test_non_tty_returns_default_without_prompting(self):
+        with patch("img2miro.cli.sys.stdin.isatty", return_value=False), patch(
+            "builtins.input"
+        ) as prompt:
+            self.assertEqual(_choose_model(), DEFAULT_MODEL)
+        prompt.assert_not_called()
+
+    def test_empty_input_returns_default(self):
+        with patch("img2miro.cli.sys.stdin.isatty", return_value=True), patch(
+            "builtins.input", return_value=""
+        ):
+            self.assertEqual(_choose_model(), DEFAULT_MODEL)
+
+    def test_numeric_choice_selects_that_model(self):
+        with patch("img2miro.cli.sys.stdin.isatty", return_value=True), patch(
+            "builtins.input", return_value="2"
+        ):
+            self.assertEqual(_choose_model(), SUPPORTED_MODELS[1])
+
+    def test_model_name_choice_is_accepted(self):
+        with patch("img2miro.cli.sys.stdin.isatty", return_value=True), patch(
+            "builtins.input", return_value=SUPPORTED_MODELS[2]
+        ):
+            self.assertEqual(_choose_model(), SUPPORTED_MODELS[2])
+
+    def test_out_of_range_choice_falls_back_to_default(self):
+        with patch("img2miro.cli.sys.stdin.isatty", return_value=True), patch(
+            "builtins.input", return_value="99"
+        ):
+            self.assertEqual(_choose_model(), DEFAULT_MODEL)
 
 
 if __name__ == "__main__":

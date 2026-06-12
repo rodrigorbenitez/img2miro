@@ -41,11 +41,13 @@ def _logged_in(claude: str) -> bool:
 
 
 def _check_claude_code() -> None:
-    """Ensure the Claude Code CLI is present and signed in to a Claude account.
+    """Ensure the Claude Code CLI is present, then sign the user in through the
+    browser before any processing.
 
-    When not signed in and running in an interactive terminal, launch the
-    browser sign-in (the user logs in with their Claude account) and continue
-    once it completes. Otherwise fail fast with setup instructions.
+    The browser sign-in is launched on every run (a fresh login each time), so
+    the user always authenticates with their Claude account up front and never
+    has to know any CLI commands. Headless machines skip it by setting
+    CLAUDE_CODE_OAUTH_TOKEN.
     """
     claude = shutil.which("claude")
     if claude is None:
@@ -54,21 +56,37 @@ def _check_claude_code() -> None:
     if os.environ.get("CLAUDE_CODE_OAUTH_TOKEN"):
         return
 
-    if _logged_in(claude):
-        return
+    print(
+        "Sign in to Claude in the browser window that opens (Pro or Max plan); "
+        "the conversion continues once you're logged in.",
+        file=sys.stderr,
+    )
+    subprocess.run([claude, "auth", "login", "--claudeai"])
+    if not _logged_in(claude):
+        sys.exit("Claude sign-in required.\n" + CLAUDE_SETUP_HELP)
 
-    if sys.stdin.isatty():
-        print(
-            "You're not signed in to Claude yet. Opening the browser sign-in - "
-            "log in there with your Claude account (Pro or Max plan), then the "
-            "conversion will continue.",
-            file=sys.stderr,
-        )
-        subprocess.run([claude, "auth", "login", "--claudeai"])
-        if _logged_in(claude):
-            return
 
-    sys.exit("Claude sign-in required.\n" + CLAUDE_SETUP_HELP)
+def _choose_model(default: str = DEFAULT_MODEL) -> str:
+    """Prompt for the vision model interactively. Returns ``default`` on empty
+    input, an unrecognized choice, or a non-interactive run (piped/headless)."""
+    if not sys.stdin.isatty():
+        return default
+
+    print("Choose the vision model:", file=sys.stderr)
+    for index, name in enumerate(SUPPORTED_MODELS, start=1):
+        suffix = " (default, most capable)" if name == default else ""
+        print(f"  {index}) {name}{suffix}", file=sys.stderr)
+
+    default_index = SUPPORTED_MODELS.index(default) + 1
+    choice = input(f"Model number [default {default_index}]: ").strip()
+    if not choice:
+        return default
+    if choice.isdigit() and 1 <= int(choice) <= len(SUPPORTED_MODELS):
+        return SUPPORTED_MODELS[int(choice) - 1]
+    if choice in SUPPORTED_MODELS:
+        return choice
+    print(f"Unrecognized choice '{choice}'; using {default}.", file=sys.stderr)
+    return default
 
 
 def main(argv: list[str] | None = None) -> None:
@@ -93,10 +111,10 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument(
         "--model",
         choices=SUPPORTED_MODELS,
-        default=DEFAULT_MODEL,
+        default=None,
         help=(
-            "Claude model used for vision extraction "
-            f"(default: {DEFAULT_MODEL}; fable is most capable, "
+            "Claude model for vision extraction. Omit to choose interactively "
+            f"at startup (default: {DEFAULT_MODEL}; fable is most capable, "
             "opus is cheaper on usage limits, sonnet is lightest/fastest)"
         ),
     )
@@ -111,15 +129,19 @@ def main(argv: list[str] | None = None) -> None:
     if not args.image.is_file():
         sys.exit(f"Image not found: {args.image}")
 
-    _check_claude_code()
-
+    # Validate cheap config before opening a browser so a misconfigured run
+    # fails fast instead of after the user logs in.
     if not os.environ.get("MIRO_ACCESS_TOKEN"):
         sys.exit(
             "Missing environment variable: MIRO_ACCESS_TOKEN. "
             "Set it in the environment or in a .env file."
         )
 
-    diagram = extract(args.image, refine=args.refine, model=args.model)
+    # First thing before processing: sign in via the browser, then pick a model.
+    _check_claude_code()
+    model = args.model or _choose_model()
+
+    diagram = extract(args.image, refine=args.refine, model=model)
     diagram = normalize_layout(diagram)
     print(
         f"Extracted {len(diagram.nodes)} node(s), "
