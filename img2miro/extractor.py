@@ -14,7 +14,6 @@ from pathlib import Path
 
 from claude_agent_sdk import (
     ClaudeAgentOptions,
-    ClaudeSDKError,
     CLINotFoundError,
     ResultMessage,
     query,
@@ -40,6 +39,10 @@ MEDIA_TYPES = {
 # SVGs are sent as source text, not pixels — the markup carries exact
 # coordinates, colors, fonts, and text, so nothing has to be estimated.
 MAX_SVG_BYTES = 800_000
+
+# Cap on the Claude Code CLI stderr lines kept for error reporting. The CLI is
+# chatty; we only want enough to surface the actual cause when a run fails.
+MAX_STDERR_LINES = 60
 
 SVG_PREAMBLE = """\
 The diagram is provided as SVG source code below (not as a rendered image). \
@@ -225,9 +228,25 @@ def _parse_diagram(text: str) -> Diagram:
     return _validate_diagram(data)
 
 
+def _stderr_suffix(lines: list[str]) -> str:
+    """Format captured CLI stderr to append to an error message, or '' if
+    there was nothing useful."""
+    text = "\n".join(line for line in lines if line.strip())
+    return f"\n\nClaude Code CLI said:\n{text}" if text else ""
+
+
 def _agent_output(prompt: str, model: str, cwd: Path) -> str | dict:
     """Run one non-interactive agent turn; return the structured output
     (dict) if the CLI produced one, otherwise the final response text."""
+    # The CLI's own stderr is where the real cause of a failure shows up
+    # (model unavailable, usage limit, bad flag); capture it so a crash
+    # surfaces something actionable instead of an opaque wrapper message.
+    stderr_lines: list[str] = []
+
+    def _capture_stderr(line: str) -> None:
+        if len(stderr_lines) < MAX_STDERR_LINES:
+            stderr_lines.append(line.rstrip("\n"))
+
     options = ClaudeAgentOptions(
         model=model,
         tools=["Read"],  # the agent's entire tool set: just viewing the image
@@ -235,6 +254,7 @@ def _agent_output(prompt: str, model: str, cwd: Path) -> str | dict:
         max_turns=8,
         cwd=cwd,
         output_format={"type": "json_schema", "schema": Diagram.model_json_schema()},
+        stderr=_capture_stderr,
     )
 
     async def _run() -> ResultMessage | None:
@@ -254,8 +274,15 @@ def _agent_output(prompt: str, model: str, cwd: Path) -> str | dict:
             "your Claude account via `claude auth login` (requires a Claude "
             "Pro/Max subscription)."
         ) from exc
-    except ClaudeSDKError as exc:
-        raise RuntimeError(f"Claude Code agent failed: {exc}") from exc
+    except Exception as exc:
+        # ClaudeSDKError covers the documented failures, but the SDK also
+        # raises a bare Exception from its message stream when the CLI exits
+        # non-zero (e.g. "Claude Code returned an error result: ..."). Catch
+        # both so the user gets a clean message with the CLI's own stderr
+        # rather than a raw traceback.
+        raise RuntimeError(
+            f"Claude Code agent failed: {exc}{_stderr_suffix(stderr_lines)}"
+        ) from exc
     finally:
         print(flush=True, file=sys.stderr)
 
@@ -266,6 +293,7 @@ def _agent_output(prompt: str, model: str, cwd: Path) -> str | dict:
         raise RuntimeError(
             f"Extraction failed ({result.subtype})"
             + (f": {details}" if details else ".")
+            + _stderr_suffix(stderr_lines)
         )
     if result.structured_output is not None:
         return result.structured_output

@@ -10,8 +10,10 @@ from unittest.mock import patch
 from img2miro.extractor import (
     EXTRACT_PROMPT,
     MAX_SVG_BYTES,
+    _agent_output,
     _parse_diagram,
     _source_part,
+    _stderr_suffix,
     extract,
 )
 from img2miro.schema import Diagram
@@ -140,6 +142,49 @@ class ExtractTests(TempDirTestCase):
         with patch("img2miro.extractor._agent_output", return_value="not json"):
             with self.assertRaises(RuntimeError):
                 extract(image, refine=False)
+
+
+class StderrSuffixTests(unittest.TestCase):
+    def test_empty_lines_produce_no_suffix(self):
+        self.assertEqual(_stderr_suffix([]), "")
+        self.assertEqual(_stderr_suffix(["", "  "]), "")
+
+    def test_lines_are_appended_under_a_header(self):
+        suffix = _stderr_suffix(["model not found", "exiting"])
+        self.assertIn("Claude Code CLI said:", suffix)
+        self.assertIn("model not found", suffix)
+
+
+class AgentOutputErrorTests(unittest.TestCase):
+    """`asyncio.run` is faked; close the `_run()` coroutine it receives so the
+    test doesn't leak an un-awaited coroutine."""
+
+    @staticmethod
+    def _fake_run(*, raises=None, returns=None):
+        def run(coro):
+            coro.close()
+            if raises is not None:
+                raise raises
+            return returns
+
+        return run
+
+    def test_bare_sdk_exception_is_wrapped_not_raw(self):
+        # The SDK raises a plain Exception from its message stream when the CLI
+        # exits non-zero; we must surface it as a clean RuntimeError.
+        boom = Exception("Claude Code returned an error result: success")
+        with patch("img2miro.extractor.asyncio.run", self._fake_run(raises=boom)):
+            with self.assertRaises(RuntimeError) as ctx:
+                _agent_output("prompt", "claude-fable-5", Path("."))
+        msg = str(ctx.exception)
+        self.assertIn("agent failed", msg)
+        self.assertIn("error result", msg)
+
+    def test_missing_result_raises_clear_error(self):
+        with patch("img2miro.extractor.asyncio.run", self._fake_run(returns=None)):
+            with self.assertRaises(RuntimeError) as ctx:
+                _agent_output("prompt", "claude-fable-5", Path("."))
+        self.assertIn("without producing a result", str(ctx.exception))
 
 
 if __name__ == "__main__":
