@@ -10,8 +10,13 @@ import unittest
 from types import SimpleNamespace
 from unittest.mock import patch
 
-from img2miro.cli import _check_claude_code, _choose_model, _logged_in
-from img2miro.extractor import DEFAULT_MODEL, SUPPORTED_MODELS
+from img2miro.cli import (
+    _check_claude_code,
+    _choose_backend,
+    _choose_model,
+    _logged_in,
+)
+from img2miro.extractor import BACKENDS, DEFAULT_BACKEND, DEFAULT_MODEL, SUPPORTED_MODELS
 
 
 def _proc(stdout: str) -> SimpleNamespace:
@@ -79,6 +84,33 @@ class CheckClaudeCodeTests(unittest.TestCase):
                 _check_claude_code()
         self.assertIn("sign-in required", str(ctx.exception))
         run.assert_called_once()  # the browser login was attempted
+
+
+class ChooseBackendTests(unittest.TestCase):
+    def test_non_tty_returns_default_without_prompting(self):
+        with patch("img2miro.cli.sys.stdin.isatty", return_value=False), patch(
+            "builtins.input"
+        ) as prompt:
+            self.assertEqual(_choose_backend(), DEFAULT_BACKEND)
+        prompt.assert_not_called()
+
+    def test_empty_input_returns_default(self):
+        with patch("img2miro.cli.sys.stdin.isatty", return_value=True), patch(
+            "builtins.input", return_value=""
+        ):
+            self.assertEqual(_choose_backend(), DEFAULT_BACKEND)
+
+    def test_numeric_choice_selects_that_backend(self):
+        with patch("img2miro.cli.sys.stdin.isatty", return_value=True), patch(
+            "builtins.input", return_value="2"
+        ):
+            self.assertEqual(_choose_backend(), BACKENDS[1])
+
+    def test_out_of_range_choice_falls_back_to_default(self):
+        with patch("img2miro.cli.sys.stdin.isatty", return_value=True), patch(
+            "builtins.input", return_value="99"
+        ):
+            self.assertEqual(_choose_backend(), DEFAULT_BACKEND)
 
 
 class ChooseModelTests(unittest.TestCase):

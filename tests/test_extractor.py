@@ -15,6 +15,7 @@ from img2miro.extractor import (
     _agent_output,
     _parse_diagram,
     _result_failure_message,
+    _source_block,
     _source_part,
     _stderr_suffix,
     extract,
@@ -82,6 +83,39 @@ class SourcePartTests(TempDirTestCase):
         with self.assertRaises(ValueError) as ctx:
             _source_part(path)
         self.assertIn(".svg", str(ctx.exception))
+
+
+class SourceBlockTests(TempDirTestCase):
+    def test_png_becomes_base64_image_block(self):
+        block = _source_block(self.write("d.png", b"\x89PNG fake"))
+        self.assertEqual(block["type"], "image")
+        self.assertEqual(block["source"]["media_type"], "image/png")
+        self.assertTrue(block["source"]["data"])
+
+    def test_svg_becomes_text_block_with_markup(self):
+        svg = '<svg xmlns="http://www.w3.org/2000/svg"></svg>'
+        block = _source_block(self.write("d.svg", svg))
+        self.assertEqual(block["type"], "text")
+        self.assertIn(svg, block["text"])
+
+    def test_unsupported_suffix_rejected(self):
+        with self.assertRaises(ValueError):
+            _source_block(self.write("d.bmp", b"BM fake"))
+
+
+class ApiBackendTests(TempDirTestCase):
+    def test_api_backend_calls_api_output_not_agent(self):
+        image = self.write("d.png", b"\x89PNG fake")
+        with patch(
+            "img2miro.extractor._api_output", return_value=DIAGRAM_JSON
+        ) as api, patch("img2miro.extractor._agent_output") as agent:
+            diagram = extract(image, refine=False, backend="api")
+        api.assert_called_once()
+        agent.assert_not_called()
+        # The diagram travels as a content block, not a Read-tool path prompt.
+        content = api.call_args.args[0]
+        self.assertEqual(content[0]["type"], "image")
+        self.assertEqual(diagram.nodes[0].id, "n1")
 
 
 class ParseDiagramTests(unittest.TestCase):

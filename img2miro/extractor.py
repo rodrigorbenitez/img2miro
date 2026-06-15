@@ -1,13 +1,22 @@
-"""Vision extraction: diagram image -> Diagram via the Claude Agent SDK.
+"""Vision extraction: diagram image -> Diagram.
 
-Runs the extraction through the Claude Code CLI (claude-agent-sdk), so usage
-bills the user's Claude subscription (``claude /login`` or
-CLAUDE_CODE_OAUTH_TOKEN) instead of an Anthropic API key. The agent gets a
-single tool — Read, to view the image — and its output is constrained to JSON
-matching the Diagram schema, which we parse and validate locally with pydantic.
+Two interchangeable backends produce the same Diagram; the user picks one at
+startup:
+
+- ``"sdk"`` (Claude Agent SDK): runs through the Claude Code CLI, so usage
+  bills the user's Claude subscription (``claude /login`` or
+  CLAUDE_CODE_OAUTH_TOKEN) instead of an Anthropic API key. The agent gets a
+  single tool — Read, to view the image.
+- ``"api"`` (Anthropic API): a direct, leaner ``messages`` call billed to
+  ANTHROPIC_API_KEY. It carries none of the Claude Code system prompt, tool
+  definitions, or project context, so it consumes far fewer tokens per run.
+
+Either way the output is constrained to JSON matching the Diagram schema, which
+we parse and validate locally with pydantic.
 """
 
 import asyncio
+import base64
 import json
 import sys
 from pathlib import Path
@@ -24,8 +33,22 @@ from .schema import Diagram
 
 # Models worth using for this task (most capable first). Haiku is excluded:
 # extraction fidelity drops too far below the smaller models.
-SUPPORTED_MODELS = ["claude-fable-5", "claude-opus-4-8", "claude-sonnet-4-6"]
-DEFAULT_MODEL = "claude-fable-5"
+SUPPORTED_MODELS = ["claude-opus-4-8", "claude-fable-5", "claude-sonnet-4-6"]
+DEFAULT_MODEL = "claude-opus-4-8"
+
+# Extraction backends. "sdk" bills the Claude subscription via Claude Code;
+# "api" is a direct, much cheaper (token-wise) Anthropic API call.
+BACKENDS = ["sdk", "api"]
+DEFAULT_BACKEND = "sdk"
+
+# Minimal system prompt for the SDK path. Overriding Claude Code's default
+# system prompt strips a large fixed preamble (tool docs, agent guidance) we
+# don't need here — the task instructions all live in the user prompt — which
+# is the single biggest token saving on the SDK backend.
+SDK_SYSTEM_PROMPT = (
+    "You are a precise diagram-extraction tool. Follow the user's instructions "
+    "exactly and return only the requested JSON."
+)
 
 # Raster formats the agent can view with the Read tool.
 MEDIA_TYPES = {
@@ -199,6 +222,34 @@ def _source_part(image_path: Path) -> str:
     return IMAGE_PREAMBLE.format(path=image_path.resolve())
 
 
+def _source_block(image_path: Path) -> dict:
+    """The API-backend counterpart to ``_source_part``: the diagram as an
+    Anthropic content block. SVGs go as text (exact markup); rasters go as a
+    base64 image block — there's no Read tool, so pixels travel in the call."""
+    suffix = image_path.suffix.lower()
+    if suffix == ".svg":
+        svg = image_path.read_text(encoding="utf-8")
+        if len(svg.encode("utf-8")) > MAX_SVG_BYTES:
+            raise ValueError(
+                f"SVG file is too large ({image_path.stat().st_size} bytes; "
+                f"limit {MAX_SVG_BYTES}). Likely it embeds raster images — "
+                "export the diagram as PNG instead."
+            )
+        return {"type": "text", "text": SVG_PREAMBLE.format(svg=svg)}
+
+    media_type = MEDIA_TYPES.get(suffix)
+    if media_type is None:
+        supported = ", ".join(sorted([*MEDIA_TYPES, ".svg"]))
+        raise ValueError(
+            f"Unsupported image type '{image_path.suffix}'. Supported: {supported}"
+        )
+    data = base64.standard_b64encode(image_path.read_bytes()).decode("utf-8")
+    return {
+        "type": "image",
+        "source": {"type": "base64", "media_type": media_type, "data": data},
+    }
+
+
 def _validate_diagram(data: object) -> Diagram:
     try:
         return Diagram.model_validate(data)
@@ -268,7 +319,13 @@ def _agent_output(prompt: str, model: str, cwd: Path) -> str | dict:
         model=model,
         tools=["Read"],  # the agent's entire tool set: just viewing the image
         allowed_tools=["Read"],  # ...and it runs without permission prompts
-        max_turns=8,
+        # Token economy on the SDK path: a minimal system prompt replaces Claude
+        # Code's large default, setting_sources=[] stops it loading project
+        # CLAUDE.md/settings, and the turn budget is just enough to Read the
+        # image and answer (one Read + one reply; spare turns for a retry).
+        system_prompt=SDK_SYSTEM_PROMPT,
+        setting_sources=[],
+        max_turns=4,
         cwd=cwd,
         output_format={"type": "json_schema", "schema": Diagram.model_json_schema()},
         stderr=_capture_stderr,
@@ -333,15 +390,11 @@ def _call(prompt: str, model: str, cwd: Path) -> Diagram:
     return _validate_diagram(output)
 
 
-def extract(
-    image_path: Path,
-    refine: bool = True,
-    model: str = DEFAULT_MODEL,
-) -> Diagram:
+def _extract_sdk(image_path: Path, refine: bool, model: str) -> Diagram:
     source = _source_part(image_path)
     cwd = image_path.resolve().parent
 
-    print(f"Extracting diagram ({model})", end="", flush=True, file=sys.stderr)
+    print(f"Extracting diagram ({model}, sdk)", end="", flush=True, file=sys.stderr)
     diagram = _call(source + EXTRACT_PROMPT + JSON_INSTRUCTION, model, cwd)
 
     if refine:
@@ -350,3 +403,60 @@ def extract(
         diagram = _call(source + prompt + JSON_INSTRUCTION, model, cwd)
 
     return diagram
+
+
+def _api_output(content: list[dict], model: str) -> str:
+    """Run one Anthropic API turn and return the model's text response. Imported
+    lazily so the SDK backend needs no anthropic install at import time."""
+    import anthropic
+
+    client = anthropic.Anthropic()
+    with client.messages.stream(
+        model=model,
+        max_tokens=64000,
+        thinking={"type": "adaptive"},
+        output_config={
+            "format": {"type": "json_schema", "schema": Diagram.model_json_schema()}
+        },
+        messages=[{"role": "user", "content": content}],
+    ) as stream:
+        for _ in stream.text_stream:
+            print(".", end="", flush=True, file=sys.stderr)
+        message = stream.get_final_message()
+    print(flush=True, file=sys.stderr)
+
+    if message.stop_reason == "refusal":
+        raise RuntimeError(
+            "The model declined to process this image (stop_reason=refusal). "
+            "Try a different image."
+        )
+    return next(b.text for b in message.content if b.type == "text")
+
+
+def _extract_api(image_path: Path, refine: bool, model: str) -> Diagram:
+    source = _source_block(image_path)
+
+    print(f"Extracting diagram ({model}, api)", end="", flush=True, file=sys.stderr)
+    diagram = _parse_diagram(
+        _api_output([source, {"type": "text", "text": EXTRACT_PROMPT}], model)
+    )
+
+    if refine:
+        print("Refining extraction", end="", flush=True, file=sys.stderr)
+        prompt = REFINE_PROMPT.format(json=diagram.model_dump_json(indent=2))
+        diagram = _parse_diagram(
+            _api_output([source, {"type": "text", "text": prompt}], model)
+        )
+
+    return diagram
+
+
+def extract(
+    image_path: Path,
+    refine: bool = True,
+    model: str = DEFAULT_MODEL,
+    backend: str = DEFAULT_BACKEND,
+) -> Diagram:
+    if backend == "api":
+        return _extract_api(image_path, refine, model)
+    return _extract_sdk(image_path, refine, model)
