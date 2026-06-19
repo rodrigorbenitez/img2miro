@@ -96,7 +96,7 @@ python -m img2miro path/to/diagram.png --board <your-board-id>
 | Option | Description |
 | --- | --- |
 | `--board <id>` | Target Miro board id |
-| `--model <name>` | Claude model: `claude-fable-5` (default, most capable), `claude-opus-4-8` (~2.5× cheaper), `claude-sonnet-4-6` (cheapest/fastest) |
+| `--model <name>` | Claude model: `claude-opus-4-8` (default), `claude-fable-5` (most capable, ~2.5× the cost), `claude-sonnet-4-6` (cheapest/fastest) |
 | `--refine` / `--no-refine` | Second vision pass that audits the extraction against the image (default: on) |
 
 Supported input formats: PNG, JPEG, GIF, WebP — and **SVG**, which is read as source markup for even higher fidelity (exact coordinates, colors, and text come straight from the file).
@@ -110,7 +110,7 @@ Supported input formats: PNG, JPEG, GIF, WebP — and **SVG**, which is read as 
 
 ## Costs
 
-Miro's API is free to use. Each conversion calls the Anthropic API: with the default model and refine pass, expect roughly $0.15–0.60 per image depending on diagram complexity. `--no-refine` halves it; `--model claude-opus-4-8` reduces it further.
+Miro's API is free to use. Each conversion calls the Anthropic API: with the default model and refine pass, expect roughly $0.15–0.60 per image depending on diagram complexity. `--no-refine` halves it; `--model claude-sonnet-4-6` reduces it further.
 
 ## Limitations
 

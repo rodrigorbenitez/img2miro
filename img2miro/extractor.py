@@ -15,8 +15,8 @@ from .schema import Diagram
 
 # Models that support this call shape (adaptive thinking + structured
 # outputs + vision). Haiku is excluded: it doesn't support adaptive thinking.
-SUPPORTED_MODELS = ["claude-fable-5", "claude-opus-4-8", "claude-sonnet-4-6"]
-DEFAULT_MODEL = "claude-fable-5"
+SUPPORTED_MODELS = ["claude-opus-4-8", "claude-fable-5", "claude-sonnet-4-6"]
+DEFAULT_MODEL = "claude-opus-4-8"
 
 MEDIA_TYPES = {
     ".png": "image/png",
