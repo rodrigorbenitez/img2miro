@@ -3,6 +3,7 @@
 import unittest
 
 from img2miro.miro_client import (
+    MiroClient,
     connector_payload,
     content_html,
     fitted_font_size,
@@ -298,6 +299,19 @@ class PushDiagramTests(unittest.TestCase):
         self.assertEqual(created, 0)
         self.assertEqual(len(skipped), 1)
         self.assertEqual(client.connectors, [])
+
+
+class FocusUrlTests(unittest.TestCase):
+    def test_focus_url_appends_move_to_widget(self):
+        client = MiroClient("token", "uXjVHOXBGe8=")
+        self.assertEqual(
+            client.focus_url("3458764675979129032"),
+            "https://miro.com/app/board/uXjVHOXBGe8=/?moveToWidget=3458764675979129032",
+        )
+
+    def test_focus_url_falls_back_to_bare_url_without_item(self):
+        client = MiroClient("token", "uXjVHOXBGe8=")
+        self.assertEqual(client.focus_url(None), "https://miro.com/app/board/uXjVHOXBGe8=/")
 
 
 if __name__ == "__main__":

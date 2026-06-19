@@ -30,8 +30,8 @@ def main(argv: list[str] | None = None) -> None:
         default=DEFAULT_MODEL,
         help=(
             "Claude model used for vision extraction "
-            f"(default: {DEFAULT_MODEL}; fable is most capable, "
-            "opus is ~2.5x cheaper, sonnet is cheapest/fastest)"
+            f"(default: {DEFAULT_MODEL}; opus is the default, "
+            "fable is most capable at ~2.5x the cost, sonnet is cheapest/fastest)"
         ),
     )
     parser.add_argument(
@@ -77,7 +77,10 @@ def main(argv: list[str] | None = None) -> None:
             "(unknown endpoint id)",
             file=sys.stderr,
         )
-    print(f"Board: {miro.board_url}")
+    # Open centered on the largest new shape (first created) so the diagram is
+    # in view even when the board already holds distant items.
+    focus_id = next(iter(id_map.values()), None)
+    print(f"Board: {miro.focus_url(focus_id)}")
 
 
 if __name__ == "__main__":

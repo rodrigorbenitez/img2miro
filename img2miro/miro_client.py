@@ -203,3 +203,15 @@ class MiroClient:
     @property
     def board_url(self) -> str:
         return f"https://miro.com/app/board/{self.board_id}/"
+
+    def focus_url(self, item_id: str | None) -> str:
+        """Board URL that opens centered on a specific item.
+
+        Miro reopens a board at its last-saved viewport, which on a board
+        that already holds far-flung items can be nowhere near the freshly
+        created diagram. The ``moveToWidget`` deep-link parameter forces the
+        view onto the given item so the new diagram is visible immediately.
+        """
+        if not item_id:
+            return self.board_url
+        return f"{self.board_url}?moveToWidget={item_id}"
